@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'game_screen.dart';
+import 'auth_screen.dart';
+import '../services/auth_service.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -62,6 +65,32 @@ class HomeScreen extends StatelessWidget {
                 () {
                   _showHowToPlayDialog(context);
                 },
+              ),
+              const SizedBox(height: 20),
+              
+              // Auth Button (Login/SignUp or Logout)
+              Consumer<AuthService>(
+                builder: (ctx, authService, _) => _buildMenuButton(
+                  context,
+                  authService.isLoggedIn ? 'LOGOUT' : 'LOGIN / SIGN UP',
+                  Colors.green,
+                  () {
+                    if (authService.isLoggedIn) {
+                      authService.signOut();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Successfully logged out'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const AuthScreen()),
+                      );
+                    }
+                  },
+                ),
               ),
               const SizedBox(height: 20),
               

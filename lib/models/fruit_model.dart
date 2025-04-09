@@ -59,8 +59,8 @@ class FruitModel {
 
   // Update fruit position based on velocity and gravity
   void update(double dt, Size screenSize) {
-    // Apply gravity
-    velocity = velocity + Offset(0, 980 * dt); // Simple gravity simulation
+    // Apply gravity - reduced from 980 to 800 for longer air time
+    velocity = velocity + Offset(0, 800 * dt); // Reduced gravity for longer hang time
     
     // Update position
     position = position + velocity * dt;
@@ -121,7 +121,9 @@ class FruitModel {
   
   // Check if the fruit is off-screen
   bool isOffScreen(Size screenSize) {
-    return position.dy > screenSize.height + radius * 2;
+    // Only consider fruits off-screen if they fall below the bottom edge
+    // with an additional buffer to ensure they're completely off-screen
+    return position.dy > screenSize.height + radius * 3;
   }
   
   // Check if the fruit was sliced by the given line segment
@@ -152,8 +154,8 @@ class SlicedHalf {
   });
   
   void update(double dt) {
-    // Apply gravity and update position
-    velocity = velocity + Offset(0, 980 * dt);
+    // Apply gravity and update position - reduced from 980 to 800 for consistency
+    velocity = velocity + Offset(0, 800 * dt);
     position = position + velocity * dt;
     
     // Update rotation
