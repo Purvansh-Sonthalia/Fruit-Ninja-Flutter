@@ -43,6 +43,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
+  launcher_name: ^1.0.2
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -93,3 +95,24 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon.png"
+  min_sdk_android: 21 # Optional: Specify the minimum SDK level for Android adaptive icons
+  web:
+    generate: true
+    image_path: "assets/icon.png"
+    background_color: "#ffffff" # Optional: Set background color for web icons
+    theme_color: "#ffffff" # Optional: Set theme color for web icons
+  windows:
+    generate: true
+    image_path: "assets/icon.png"
+    icon_size: 48 # Optional: Set the icon size for Windows
+  macos:
+    generate: true
+    image_path: "assets/icon.png"
+
+launcher_name:
+  name: "FruitNinja"

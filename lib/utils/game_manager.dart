@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/fruit_model.dart';
 import '../services/scores_service.dart';
 
@@ -57,8 +58,14 @@ class GameManager {
   
   // Initialize and load high score
   Future<void> init() async {
-    // Fetch user's high score from Supabase
-    highScore = await _scoresService.getUserHighScore();
+    if (isLoggedIn) {
+      // Fetch user's high score from Supabase
+      highScore = await _scoresService.getUserHighScore();
+    } else {
+      // Load local high score if not logged in
+      final prefs = await SharedPreferences.getInstance();
+      highScore = prefs.getInt('local_high_score') ?? 0;
+    }
     highScoreNotifier.value = highScore;
   }
   
@@ -108,7 +115,6 @@ class GameManager {
       highScore = score;
       highScoreNotifier.value = highScore;
       
-      // Only try to update high score if user is logged in
       if (isLoggedIn) {
         // Update high score in Supabase
         bool success = await _scoresService.updateUserHighScore(score);
@@ -116,16 +122,17 @@ class GameManager {
         highScoreSavedNotifier.value = success;
         
         if (success) {
-          // Show notification that high score was saved
-          showNotification('New High Score Saved!');
+          showNotification('New High Score Saved to Cloud!'); // Specify cloud save
         } else {
-          // Show error notification
-          showNotification('Error saving high score');
+          showNotification('Error saving high score to cloud');
         }
       } else {
-        // Reset saved state if not logged in
-        isHighScoreSaved = false;
+        // Save high score locally if not logged in
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('local_high_score', highScore);
+        isHighScoreSaved = false; // Not saved to cloud
         highScoreSavedNotifier.value = false;
+        showNotification('New High Score Saved Locally!'); // Specify local save
       }
     }
   }

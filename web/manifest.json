@@ -1,6 +1,6 @@
 {
-    "name": "fruit_ninja_flutter",
-    "short_name": "fruit_ninja_flutter",
+    "name": "FruitNinja",
+    "short_name": "FruitNinja",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

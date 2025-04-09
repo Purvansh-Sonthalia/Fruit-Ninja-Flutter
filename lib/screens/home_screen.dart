@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'game_screen.dart';
 import 'auth_screen.dart';
 import '../services/auth_service.dart';
+import 'package:flutter/services.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -103,6 +104,17 @@ class HomeScreen extends StatelessWidget {
                   _showCreditsDialog(context);
                 },
               ),
+              const SizedBox(height: 20),
+              
+              // Exit Button (New)
+              _buildMenuButton(
+                context,
+                'EXIT',
+                Colors.grey[700]!,
+                () {
+                  SystemNavigator.pop();
+                },
+              ),
             ],
           ),
         ),
@@ -117,8 +129,8 @@ class HomeScreen extends StatelessWidget {
     VoidCallback onPressed,
   ) {
     return SizedBox(
-      width: 200,
-      height: 60,
+      width: 250,
+      height: 70,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
@@ -166,11 +178,11 @@ class HomeScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16),
               ),
               SizedBox(height: 10),
-              Text('3. Missing fruits will cost you lives',
+              Text('3. Missing fruits will cost you quarter of a life',
                 style: TextStyle(fontSize: 16),
               ),
               SizedBox(height: 10),
-              Text('4. Avoid slicing bombs or you\'ll lose a life',
+              Text('4. Avoid slicing bombs or you\'ll lose instantly',
                 style: TextStyle(fontSize: 16),
               ),
               SizedBox(height: 10),
@@ -214,7 +226,7 @@ class HomeScreen extends StatelessWidget {
               Text('Developed by:',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              Text('Your Name Here'),
+              Text('Purvansh Sonthalia'),
               SizedBox(height: 20),
               Text('Original Game:',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),

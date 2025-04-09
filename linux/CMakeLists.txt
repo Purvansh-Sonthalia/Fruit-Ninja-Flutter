@@ -2,9 +2,16 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
-# The name of the executable created for the application. Change this to change
-# the on-disk name of your application.
-set(BINARY_NAME "fruit_ninja_flutter")
+# The name of the executable to produce, and the name of the top-level
+# directory in the final bundle.
+set(BINARY_NAME "FruitNinja")
+
+# Human-readable name to display for the application, used in the app launcher.
+set(APPLICATION_NAME "FruitNinja")
+
+# Desktop file configuration
+set(DESKTOP_FILE_NAME "${BINARY_NAME}.desktop")
+
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.example.fruit_ninja_flutter")
