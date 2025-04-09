@@ -10,7 +10,9 @@ class AssetsManager {
     return _instance;
   }
   
-  AssetsManager._internal();
+  AssetsManager._internal() {
+    preloadAudio();
+  }
   
   // Image caches
   final Map<FruitType, Color> _fruitColors = {
@@ -35,28 +37,29 @@ class AssetsManager {
   
   // Preload audio assets
   Future<void> preloadAudio() async {
-    // This would be used for caching audio files
-    // We'll skip actual implementation since we don't have the audio files yet
+    await slicePlayer.setSource(AssetSource('audio/slice.mp3'));
+    await missPlayer.setSource(AssetSource('audio/miss.mp3'));
+    await bombPlayer.setSource(AssetSource('audio/bomb.mp3'));
   }
   
   // Play a sound effect
   void playSound(String soundName) {
     switch (soundName) {
       case 'slice':
-        slicePlayer.play(AssetSource('audio/slice.mp3'));
+        slicePlayer.resume();
         break;
       case 'miss':
-        missPlayer.play(AssetSource('audio/miss.mp3'));
+        missPlayer.resume();
         break;
       case 'bomb':
-        bombPlayer.play(AssetSource('audio/bomb.mp3'));
+        bombPlayer.resume();
         break;
     }
   }
   
   // Play background music
   void playBackgroundMusic() {
-    backgroundPlayer.play(AssetSource('audio/background.mp3'));
+    backgroundPlayer.play(AssetSource('audio/background.mp3'), volume: 3.0);
     backgroundPlayer.setReleaseMode(ReleaseMode.loop);
   }
   

@@ -38,10 +38,10 @@ class GameManager {
   final ScoresService _scoresService = ScoresService();
   final SupabaseClient _supabaseClient = Supabase.instance.client;
   
-  // Sound effects
-  final AudioPlayer _slicePlayer = AudioPlayer();
-  final AudioPlayer _bombPlayer = AudioPlayer();
-  final AudioPlayer _missPlayer = AudioPlayer();
+  // Sound effects - Make non-final to allow re-initialization
+  AudioPlayer _slicePlayer = AudioPlayer();
+  AudioPlayer _bombPlayer = AudioPlayer();
+  AudioPlayer _missPlayer = AudioPlayer();
   
   // Singleton pattern
   static final GameManager _instance = GameManager._internal();
@@ -71,6 +71,11 @@ class GameManager {
     fruits.clear();
     isHighScoreSaved = false;
     highScoreSavedNotifier.value = false;
+    
+    // Re-initialize audio players for the new game
+    _slicePlayer = AudioPlayer();
+    _bombPlayer = AudioPlayer();
+    _missPlayer = AudioPlayer();
     
     scoreNotifier.value = score;
     livesNotifier.value = lives;
@@ -278,7 +283,7 @@ class GameManager {
           showNotification('💥 BOOM! Instant Death! 💥');
           
           // Delay the game over screen slightly for dramatic effect
-          Future.delayed(const Duration(milliseconds: 800), () {
+          Future.delayed(const Duration(milliseconds: 400), () {
             gameOver();
           });
         } else {
@@ -300,13 +305,13 @@ class GameManager {
   void _playSound(String soundName) {
     switch (soundName) {
       case 'slice':
-        _slicePlayer.play(AssetSource('audio/slice.mp3'));
+        _slicePlayer.play(AssetSource('audio/slice.mp3'), volume: 5.0);
         break;
       case 'bomb':
-        _bombPlayer.play(AssetSource('audio/bomb.mp3'));
+        _bombPlayer.play(AssetSource('audio/bomb.mp3'), volume: 5.0);
         break;
       case 'miss':
-        _missPlayer.play(AssetSource('audio/miss.mp3'));
+        _missPlayer.play(AssetSource('audio/miss.mp3'), volume: 5.0);
         break;
     }
   }
