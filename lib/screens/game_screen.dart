@@ -116,38 +116,19 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 
   // Helper method to render partial hearts
   Widget _buildHeartIcon(double fillAmount) {
-    if (fillAmount <= 0) {
-      return const Icon(
-        Icons.favorite_border,
-        color: Colors.red,
-        size: 24,
-      );
-    } else if (fillAmount >= 1) {
-      return const Icon(
-        Icons.favorite,
-        color: Colors.red,
-        size: 24,
-      );
-    } else {
-      // Partial heart (using stack with a clip)
-      return Stack(
-        children: [
-          const Icon(
-            Icons.favorite_border,
-            color: Colors.red,
-            size: 24,
-          ),
-          ClipRect(
-            clipper: _HeartClipper(fillAmount: fillAmount),
-            child: const Icon(
-              Icons.favorite,
-              color: Colors.red,
-              size: 24,
-            ),
-          ),
-        ],
-      );
-    }
+    // Clamp fillAmount between 0 and 1 to ensure proper display
+    double clampedFill = fillAmount.clamp(0.0, 1.0);
+    // Convert to quarters for cleaner visual representation
+    int quarters = (clampedFill * 4).floor();
+    
+    // Custom heart with partial fill based on quarters
+    return SizedBox(
+      width: 32,
+      height: 30,
+      child: CustomPaint(
+        painter: HeartPainter(quarters: quarters),
+      ),
+    );
   }
 
   @override
@@ -212,7 +193,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
                     (index) {
                       double fillAmount = lives - index; // How full this heart should be
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        padding: const EdgeInsets.symmetric(horizontal: 6.0),
                         child: _buildHeartIcon(fillAmount),
                       );
                     },
@@ -686,24 +667,116 @@ class GamePainter extends CustomPainter {
   }
 }
 
-// Custom clipper to show partial hearts
-class _HeartClipper extends CustomClipper<Rect> {
-  final double fillAmount;
-
-  _HeartClipper({required this.fillAmount});
-
+// Custom heart painter to show quarter hearts
+class HeartPainter extends CustomPainter {
+  final int quarters; // 0-4 quarters filled (0=empty, 4=full)
+  
+  HeartPainter({required this.quarters});
+  
   @override
-  Rect getClip(Size size) {
-    return Rect.fromLTRB(
-      0,
-      0,
-      size.width * fillAmount,
-      size.height,
+  void paint(Canvas canvas, Size size) {
+    final double width = size.width;
+    final double height = size.height;
+    
+    // Heart shape path - adjusted to be wider
+    final path = Path();
+    path.moveTo(width * 0.5, height * 0.25);
+    path.cubicTo(
+      width * 0.15, height * 0.0, // Adjusted control point 1 to be wider
+      width * -0.05, height * 0.35, // Adjusted control point 2 to be wider
+      width * 0.5, height * 0.95, // End point
     );
+    path.cubicTo(
+      width * 1.05, height * 0.35, // Adjusted control point 1 to be wider
+      width * 0.85, height * 0.0, // Adjusted control point 2 to be wider
+      width * 0.5, height * 0.25, // End point
+    );
+    path.close();
+    
+    // Paint for outline
+    final outlinePaint = Paint()
+      ..color = Colors.red.shade300
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    
+    // Draw outline
+    canvas.drawPath(path, outlinePaint);
+    
+    // If there's some fill
+    if (quarters > 0) {
+      // Paint for filled part
+      final fillPaint = Paint()
+        ..color = Colors.red
+        ..style = PaintingStyle.fill;
+      
+      if (quarters == 4) {
+        // Full heart
+        canvas.drawPath(path, fillPaint);
+      } else {
+        // Partial heart based on quarters
+        // Create the quarter paths
+        final rect = path.getBounds();
+        
+        // Only draw the appropriate sections based on quarters
+        // Custom depletion pattern:
+        // 1. First damage: Top-right quarter disappears
+        // 2. Second damage: Bottom-right quarter disappears
+        // 3. Third damage: Bottom-left quarter disappears
+        // 4. Fourth damage: Top-left quarter disappears (heart becomes empty)
+        
+        // Create composite path with only the quarters we want to keep
+        Path visiblePath = Path();
+        
+        // Top-left quarter
+        if (quarters >= 1) {
+          Path topLeftQuarter = Path()
+            ..moveTo(rect.left, rect.top)
+            ..lineTo(rect.center.dx, rect.top)
+            ..lineTo(rect.center.dx, rect.center.dy)
+            ..lineTo(rect.left, rect.center.dy)
+            ..close();
+          visiblePath.addPath(topLeftQuarter, Offset.zero);
+        }
+        
+        // Bottom-left quarter
+        if (quarters >= 2) {
+          Path bottomLeftQuarter = Path()
+            ..moveTo(rect.left, rect.center.dy)
+            ..lineTo(rect.center.dx, rect.center.dy)
+            ..lineTo(rect.center.dx, rect.bottom)
+            ..lineTo(rect.left, rect.bottom)
+            ..close();
+          visiblePath.addPath(bottomLeftQuarter, Offset.zero);
+        }
+        
+        // Bottom-right quarter
+        if (quarters >= 3) {
+          Path bottomRightQuarter = Path()
+            ..moveTo(rect.center.dx, rect.center.dy)
+            ..lineTo(rect.right, rect.center.dy)
+            ..lineTo(rect.right, rect.bottom)
+            ..lineTo(rect.center.dx, rect.bottom)
+            ..close();
+          visiblePath.addPath(bottomRightQuarter, Offset.zero);
+        }
+        
+        // Save canvas state
+        canvas.save();
+        
+        // Apply the clip path to show only the heart shape
+        canvas.clipPath(path);
+        
+        // Draw the visible parts
+        canvas.drawPath(visiblePath, fillPaint);
+        
+        // Restore canvas state
+        canvas.restore();
+      }
+    }
   }
-
+  
   @override
-  bool shouldReclip(_HeartClipper oldClipper) {
-    return fillAmount != oldClipper.fillAmount;
+  bool shouldRepaint(covariant HeartPainter oldDelegate) {
+    return quarters != oldDelegate.quarters;
   }
 } 
