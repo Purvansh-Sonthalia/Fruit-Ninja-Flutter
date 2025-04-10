@@ -6,6 +6,8 @@ import '../services/auth_service.dart';
 import 'package:flutter/services.dart';
 import 'weather_screen.dart';
 import '../services/weather_provider.dart';
+import 'settings_screen.dart';
+import '../utils/assets_manager.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -14,6 +16,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WeatherProvider>().fetchWeatherIfNeeded();
+      context.read<AssetsManager>().playBackgroundMusic();
     });
 
     return Scaffold(
@@ -111,9 +114,34 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
             ),
+            // --- Icons in Corners ---
+            // Settings Icon Button (Top-Left)
             Positioned(
               top: 40.0,
-              right: 20.0,
+              left: 10.0, // Anchor to left
+              child: IconButton(
+                icon: const Icon(
+                  Icons.settings,
+                  color: Colors.white,
+                  size: 38.0,
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ),
+                  );
+                },
+                tooltip: 'Settings',
+              ),
+            ),
+
+            // Weather Icon Button (Top-Right)
+            Positioned(
+              top: 40.0,
+              right: 10.0, // Keep anchored to right
+              // Remove the Row, place IconButton directly
               child: IconButton(
                 icon: const Icon(
                   Icons.wb_sunny,
@@ -131,6 +159,7 @@ class HomeScreen extends StatelessWidget {
                 tooltip: 'Weather',
               ),
             ),
+            // --- End Icons ---
           ],
         ),
       ),

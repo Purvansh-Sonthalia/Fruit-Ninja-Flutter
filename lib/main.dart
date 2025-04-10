@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:fruit_ninja_flutter/screens/home_screen.dart';
 import 'package:fruit_ninja_flutter/services/auth_service.dart';
 import 'package:fruit_ninja_flutter/services/weather_provider.dart';
+import 'package:fruit_ninja_flutter/utils/assets_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'utils/assets_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,9 +18,6 @@ void main() async {
     dotenv.env['SUPABASE_URL']!,
     dotenv.env['SUPABASE_ANON_KEY']!,
   );
-
-  // Start background music globally
-  AssetsManager().playBackgroundMusic();
 
   // Set preferred orientations (portrait only)
   SystemChrome.setPreferredOrientations([
@@ -49,6 +46,7 @@ class MyApp extends StatelessWidget {
           },
         ),
         ChangeNotifierProvider(create: (_) => WeatherProvider()),
+        ChangeNotifierProvider.value(value: AssetsManager()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
