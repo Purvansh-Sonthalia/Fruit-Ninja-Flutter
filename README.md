@@ -40,11 +40,11 @@ This game demonstrates several Flutter concepts:
 
 1. Clone this repository
    ```
-   git clone https://github.com/yourusername/fruit_ninja_flutter.git
+   git clone https://github.com/Purvansh-Sonthalia/Fruit-Ninja-Flutter.git
    ```
 2. Navigate to the project directory
    ```
-   cd fruit_ninja_flutter
+   cd Fruit-Ninja-Flutter
    ```
 3. Install dependencies
    ```
