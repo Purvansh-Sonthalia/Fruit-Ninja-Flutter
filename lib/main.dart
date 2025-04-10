@@ -1,14 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'package:fruit_ninja_flutter/screens/home_screen.dart';
 import 'package:fruit_ninja_flutter/services/auth_service.dart';
 import 'package:fruit_ninja_flutter/services/weather_provider.dart';
 import 'package:fruit_ninja_flutter/utils/assets_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'services/firebase_messaging_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Notifications Service (We might remove this later)
+  // await NotificationService().initialize();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Initialize FCM Service AFTER Firebase Core
+  await FirebaseMessagingService().initialize();
 
   // Load environment variables
   await dotenv.load();

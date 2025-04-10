@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "457498373948",
+    "project_id": "fruit-ninja-purvansh",
+    "storage_bucket": "fruit-ninja-purvansh.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:457498373948:android:74c6578ce042d3d7c57839",
+        "android_client_info": {
+          "package_name": "com.example.fruit_ninja_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCX_HjQbxh6ArFBDxB7FE4OCi-fVxAKyx0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'package:provider/provider.dart'; // Import Provider
 import '../utils/assets_manager.dart'; // Import AssetsManager
-import '../services/notification_service.dart'; // Import NotificationService
+// import '../services/notification_service.dart'; // Remove local notification service import
+import '../services/firebase_messaging_service.dart'; // Import FCM Service
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -43,11 +44,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _sfxVolume = prefs.getDouble(_sfxVolumeKey) ?? _sfxVolume;
       _isLoading = false; // Loading finished
     });
+    // No need to sync subscription here, FirebaseMessagingService handles initial sync
   }
 
-  // Handle notification toggle change
+  // Handle notification toggle change - Now subscribes/unsubscribes
   Future<void> _handleNotificationSettingChange(bool enabled) async {
-    // Save the new setting immediately
+    // Save the setting
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_notificationsKey, enabled);
 
@@ -56,31 +58,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _notificationsEnabled = enabled;
     });
 
-    // Apply the change (request permission, schedule/cancel)
+    // Apply the change using FirebaseMessagingService
     if (enabled) {
-      print("Requesting permission and scheduling notification...");
-      // Request permissions (will only show prompt if not granted/denied previously)
-      bool granted = await NotificationService().requestPermissions(context);
-
-      if (granted) {
-        print("Permission granted, scheduling notification.");
-        await NotificationService().scheduleEnticingNotification();
-      } else {
-        print("Permission denied, cannot schedule notification.");
-        // Revert the toggle state in UI and storage if permission denied
-        setState(() => _notificationsEnabled = false);
-        await prefs.setBool(_notificationsKey, false);
-        // Optionally show a snackbar/dialog explaining why it was turned off
-        if (mounted) {
-          // Check if widget is still in the tree
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Notification permission denied.')),
-          );
-        }
-      }
+      print("Subscribing to reminder topic...");
+      // Request permissions first (optional here, as initialize does it, but good practice)
+      // await FirebaseMessagingService().requestPermissions();
+      await FirebaseMessagingService().subscribeToReminders();
     } else {
-      print("Cancelling notifications as setting is disabled.");
-      await NotificationService().cancelAllNotifications();
+      print("Unsubscribing from reminder topic...");
+      await FirebaseMessagingService().unsubscribeFromReminders();
     }
   }
 
@@ -176,7 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         value: _notificationsEnabled,
                         onChanged: (bool value) {
-                          // Directly call the handler
+                          // Call the updated handler
                           _handleNotificationSettingChange(value);
                         },
                         activeColor: Colors.orangeAccent, // Match theme accent
