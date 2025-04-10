@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'package:provider/provider.dart'; // Import Provider
 import '../utils/assets_manager.dart'; // Import AssetsManager
+import '../services/notification_service.dart'; // Import NotificationService
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,8 +18,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const String _bgmVolumeKey = 'settings_bgm_volume';
   static const String _sfxVolumeKey = 'settings_sfx_volume';
 
-  // State variables with defaults (used if loading fails or first time)
-  bool _notificationsEnabled = true;
+  // State variables - Notification OFF by default
+  bool _notificationsEnabled = false;
   double _bgmVolume = 1.0;
   double _sfxVolume = 1.0;
   double _masterVolume = 1.0;
@@ -36,13 +37,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // final audioManager = context.read<AssetsManager>(); // Cannot use context in initState
     setState(() {
       // Load values, using current state as default if key not found
-      _notificationsEnabled =
-          prefs.getBool(_notificationsKey) ?? _notificationsEnabled;
+      _notificationsEnabled = prefs.getBool(_notificationsKey) ?? false;
       _masterVolume = prefs.getDouble(_masterVolumeKey) ?? _masterVolume;
       _bgmVolume = prefs.getDouble(_bgmVolumeKey) ?? _bgmVolume;
       _sfxVolume = prefs.getDouble(_sfxVolumeKey) ?? _sfxVolume;
       _isLoading = false; // Loading finished
     });
+  }
+
+  // Handle notification toggle change
+  Future<void> _handleNotificationSettingChange(bool enabled) async {
+    // Save the new setting immediately
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_notificationsKey, enabled);
+
+    // Update UI state
+    setState(() {
+      _notificationsEnabled = enabled;
+    });
+
+    // Apply the change (request permission, schedule/cancel)
+    if (enabled) {
+      print("Requesting permission and scheduling notification...");
+      // Request permissions (will only show prompt if not granted/denied previously)
+      bool granted = await NotificationService().requestPermissions(context);
+
+      if (granted) {
+        print("Permission granted, scheduling notification.");
+        await NotificationService().scheduleEnticingNotification();
+      } else {
+        print("Permission denied, cannot schedule notification.");
+        // Revert the toggle state in UI and storage if permission denied
+        setState(() => _notificationsEnabled = false);
+        await prefs.setBool(_notificationsKey, false);
+        // Optionally show a snackbar/dialog explaining why it was turned off
+        if (mounted) {
+          // Check if widget is still in the tree
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Notification permission denied.')),
+          );
+        }
+      }
+    } else {
+      print("Cancelling notifications as setting is disabled.");
+      await NotificationService().cancelAllNotifications();
+    }
   }
 
   // Helper method to build a volume slider section
@@ -137,14 +176,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         value: _notificationsEnabled,
                         onChanged: (bool value) {
-                          setState(() {
-                            _notificationsEnabled = value;
-                          });
-                          // Save notification setting (keep using _saveSetting or move to a dedicated SettingsProvider)
-                          _saveNotificationSetting(
-                            value,
-                          ); // Assume separate save for non-audio
-                          // TODO: Apply notification setting change
+                          // Directly call the handler
+                          _handleNotificationSettingChange(value);
                         },
                         activeColor: Colors.orangeAccent, // Match theme accent
                         inactiveThumbColor: Colors.grey,
@@ -209,11 +242,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
-  }
-
-  // Keep separate save for notifications for now
-  Future<void> _saveNotificationSetting(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_notificationsKey, value);
   }
 }
