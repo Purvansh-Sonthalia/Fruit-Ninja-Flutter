@@ -19,6 +19,13 @@ class HomeScreen extends StatelessWidget {
       context.read<AssetsManager>().playBackgroundMusic();
     });
 
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    // Calculate a responsive icon size, ensuring it's not too small or too large
+    final double iconSize = (screenWidth * 0.08).clamp(30.0, 45.0);
+    // Define top padding relative to safe area
+    const double edgePadding = 10.0;
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -31,136 +38,137 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        child: Stack(
-          children: [
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Title
-                  const Text(
-                    'FRUIT NINJA',
-                    style: TextStyle(
-                      fontSize: 56,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(
-                          blurRadius: 10.0,
-                          color: Colors.red,
-                          offset: Offset(5.0, 5.0),
-                        ),
-                      ],
+        child: SafeArea( // Ensure content respects safe areas (notches, etc.)
+          child: Stack(
+            children: [
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Title
+                    const Text(
+                      'FRUIT NINJA',
+                      style: TextStyle(
+                        fontSize: 56,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            blurRadius: 10.0,
+                            color: Colors.red,
+                            offset: Offset(5.0, 5.0),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 80),
+                    const SizedBox(height: 20),
 
-                  // Play Button
-                  _buildMenuButton(context, 'PLAY', Colors.red, () {
+                    // Play Button
+                    _buildMenuButton(context, 'PLAY', Colors.red, () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const GameScreen(),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 20),
+
+                    // How to Play Button
+                    _buildMenuButton(context, 'HOW TO PLAY', Colors.orange, () {
+                      _showHowToPlayDialog(context);
+                    }),
+                    const SizedBox(height: 20),
+
+                    // Auth Button (Login/SignUp or Logout)
+                    Consumer<AuthService>(
+                      builder:
+                          (ctx, authService, _) => _buildMenuButton(
+                            context,
+                            authService.isLoggedIn ? 'LOGOUT' : 'LOGIN / SIGN UP',
+                            Colors.green,
+                            () {
+                              if (authService.isLoggedIn) {
+                                authService.signOut();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Successfully logged out'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const AuthScreen(),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Credits Button
+                    _buildMenuButton(context, 'CREDITS', Colors.blue, () {
+                      _showCreditsDialog(context);
+                    }),
+                    const SizedBox(height: 20),
+
+                    // Exit Button (New)
+                    _buildMenuButton(context, 'EXIT', Colors.grey[700]!, () {
+                      SystemNavigator.pop();
+                    }),
+                  ],
+                ),
+              ),
+              // --- Icons in Corners ---
+              // Settings Icon Button (Top-Left)
+              Positioned(
+                top: edgePadding, // Use calculated padding from safe area top
+                left: edgePadding, // Anchor to left safe area edge
+                child: IconButton(
+                  icon: Icon(
+                    Icons.settings,
+                    color: Colors.white,
+                    size: iconSize, // Use responsive size
+                  ),
+                  onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const GameScreen(),
+                        builder: (context) => const SettingsScreen(),
                       ),
                     );
-                  }),
-                  const SizedBox(height: 20),
+                  },
+                  tooltip: 'Settings',
+                ),
+              ),
 
-                  // How to Play Button
-                  _buildMenuButton(context, 'HOW TO PLAY', Colors.orange, () {
-                    _showHowToPlayDialog(context);
-                  }),
-                  const SizedBox(height: 20),
-
-                  // Auth Button (Login/SignUp or Logout)
-                  Consumer<AuthService>(
-                    builder:
-                        (ctx, authService, _) => _buildMenuButton(
-                          context,
-                          authService.isLoggedIn ? 'LOGOUT' : 'LOGIN / SIGN UP',
-                          Colors.green,
-                          () {
-                            if (authService.isLoggedIn) {
-                              authService.signOut();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Successfully logged out'),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            } else {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const AuthScreen(),
-                                ),
-                              );
-                            }
-                          },
-                        ),
+              // Weather Icon Button (Top-Right)
+              Positioned(
+                top: edgePadding, // Use calculated padding from safe area top
+                right: edgePadding, // Keep anchored to right safe area edge
+                child: IconButton(
+                  icon: Icon(
+                    Icons.wb_sunny,
+                    color: Colors.orangeAccent,
+                    size: iconSize, // Use responsive size
                   ),
-                  const SizedBox(height: 20),
-
-                  // Credits Button
-                  _buildMenuButton(context, 'CREDITS', Colors.blue, () {
-                    _showCreditsDialog(context);
-                  }),
-                  const SizedBox(height: 20),
-
-                  // Exit Button (New)
-                  _buildMenuButton(context, 'EXIT', Colors.grey[700]!, () {
-                    SystemNavigator.pop();
-                  }),
-                ],
-              ),
-            ),
-            // --- Icons in Corners ---
-            // Settings Icon Button (Top-Left)
-            Positioned(
-              top: 40.0,
-              left: 10.0, // Anchor to left
-              child: IconButton(
-                icon: const Icon(
-                  Icons.settings,
-                  color: Colors.white,
-                  size: 38.0,
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const WeatherScreen(),
+                      ),
+                    );
+                  },
+                  tooltip: 'Weather',
                 ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
-                  );
-                },
-                tooltip: 'Settings',
               ),
-            ),
-
-            // Weather Icon Button (Top-Right)
-            Positioned(
-              top: 40.0,
-              right: 10.0, // Keep anchored to right
-              // Remove the Row, place IconButton directly
-              child: IconButton(
-                icon: const Icon(
-                  Icons.wb_sunny,
-                  color: Colors.orangeAccent,
-                  size: 40.0,
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const WeatherScreen(),
-                    ),
-                  );
-                },
-                tooltip: 'Weather',
-              ),
-            ),
-            // --- End Icons ---
-          ],
+              // --- End Icons ---
+            ],
+          ),
         ),
       ),
     );

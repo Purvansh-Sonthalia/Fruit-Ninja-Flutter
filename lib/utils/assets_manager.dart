@@ -162,12 +162,12 @@ class AssetsManager with ChangeNotifier {
   // Create placeholder images for readme
   static List<String> getPlaceholderImageNames() {
     return [
-      'apple.png',
-      'banana.png',
-      'watermelon.png',
-      'peach.png',
-      'orange.png',
-      'bomb.png',
+      'apple.svg',
+      'banana.svg',
+      'watermelon.svg',
+      'peach.svg',
+      'orange.svg',
+      'bomb.svg',
       'background.jpg',
       'slice.mp3',
       'miss.mp3',

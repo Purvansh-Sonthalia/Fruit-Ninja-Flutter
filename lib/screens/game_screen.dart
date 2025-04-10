@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../models/fruit_model.dart';
 import '../utils/game_manager.dart';
 import '../services/auth_service.dart';
 import 'package:provider/provider.dart';
 import 'dart:math';
+import 'dart:ui' as ui;
+import 'dart:async';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -17,15 +20,19 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   List<Offset> slicePoints = [];
   late AnimationController _controller;
   bool _isLoading = true;
+  // Cache for loaded Images (dart:ui Image)
+  final Map<String, ui.Image> _imageCache = {};
+  final Map<String, Size> _imageSizeCache = {}; // Store original image sizes
 
   @override
   void initState() {
     super.initState();
     _initGameManager();
+    _preloadImages(); // Start preloading Images
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 16), // ~60 FPS
-    )..addListener(_updateGame);
+      duration: const Duration(milliseconds: 16),
+    )..addListener(_gameLoop);
     _controller.repeat();
   }
 
@@ -33,12 +40,12 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     setState(() {
       _isLoading = true;
     });
-    
     await _gameManager.init();
-    
-    setState(() {
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -54,10 +61,11 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   void dispose() {
     _controller.dispose();
     _gameManager.dispose();
+    // Dispose images? Usually not necessary as they are managed by ImageCache
     super.dispose();
   }
 
-  void _updateGame() {
+  void _gameLoop() {
     if (!mounted) return;
     
     // Calculate time delta in seconds
@@ -129,6 +137,71 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
         painter: HeartPainter(quarters: quarters),
       ),
     );
+  }
+
+  // Preload Images and store them in the state's cache
+  Future<void> _preloadImages() async {
+    print('Preloading images...');
+    try {
+      // Original loop only for base images:
+      for (var type in FruitType.values) {
+        final imagePath = _getFruitImagePath(type); // Get base image path
+        if (!_imageCache.containsKey(imagePath)) {
+          print('Loading $imagePath...');
+          final ImageProvider imageProvider = AssetImage(imagePath);
+          final ImageStream stream = imageProvider.resolve(const ImageConfiguration());
+          final completer = Completer<void>();
+          late ImageStreamListener listener;
+
+          listener = ImageStreamListener(
+            (ImageInfo imageInfo, bool synchronousCall) async {
+              final ui.Image image = imageInfo.image;
+              final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
+              if (mounted) {
+                setState(() {
+                  _imageCache[imagePath] = image;
+                  _imageSizeCache[imagePath] = imageSize;
+                  print('Loaded $imagePath successfully: $imageSize');
+                });
+              }
+              // Ensure listener is removed only once
+              stream.removeListener(listener);
+              completer.complete();
+            },
+            onError: (dynamic exception, StackTrace? stackTrace) {
+              print('Error loading image $imagePath: $exception');
+              stream.removeListener(listener);
+              // Original simple error handling:
+              if (!completer.isCompleted) completer.completeError(exception, stackTrace);
+            },
+          );
+
+          stream.addListener(listener);
+          await completer.future; // Wait for this image to load
+        } else {
+          print('$imagePath already cached.');
+        }
+      }
+      print('Image preloading complete.');
+    } catch (e, s) {
+      print('Error preloading images: $e\n$s');
+      // Handle error appropriately
+    }
+  }
+  
+  // Static helper for image paths (assuming PNG)
+  static String _getFruitImagePath(FruitType type) {
+    String filename;
+    switch (type) {
+      case FruitType.apple: filename = 'apple'; break;
+      case FruitType.banana: filename = 'banana'; break;
+      case FruitType.orange: filename = 'orange'; break;
+      case FruitType.peach: filename = 'peach'; break;
+      case FruitType.watermelon: filename = 'watermelon'; break;
+      case FruitType.bomb: filename = 'bomb'; break;
+      default: filename = 'apple'; // Fallback
+    }
+    return 'assets/images/$filename.png'; // Assuming PNG format
   }
 
   @override
@@ -246,6 +319,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
               painter: GamePainter(
                 fruits: _gameManager.fruits,
                 slicePoints: slicePoints,
+                imageCache: _imageCache, // Pass the image cache
+                imageSizeCache: _imageSizeCache, // Pass the size cache
               ),
               size: Size.infinite,
             ),
@@ -565,105 +640,166 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 class GamePainter extends CustomPainter {
   final List<FruitModel> fruits;
   final List<Offset> slicePoints;
-  
-  GamePainter({required this.fruits, required this.slicePoints});
-  
+  // Receive the caches from the state
+  final Map<String, ui.Image> imageCache;
+  final Map<String, Size> imageSizeCache;
+
+  GamePainter({required this.fruits, required this.slicePoints, required this.imageCache, required this.imageSizeCache}); // Update constructor
+
+  // Helper for image paths (can be removed if state version is used)
+  String _getFruitImagePath(FruitType type) {
+    String filename;
+    switch (type) {
+      case FruitType.apple: filename = 'apple'; break;
+      case FruitType.banana: filename = 'banana'; break;
+      case FruitType.orange: filename = 'orange'; break;
+      case FruitType.peach: filename = 'peach'; break;
+      case FruitType.watermelon: filename = 'watermelon'; break;
+      case FruitType.bomb: filename = 'bomb'; break;
+      default: filename = 'apple'; // Fallback
+    }
+    return 'assets/images/$filename.png'; // Assuming PNG format
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw fruits
+    final Paint paint = Paint(); // Reusable paint
+
+    // --- Draw Fruits using Images ---
     for (var fruit in fruits) {
-      if (!fruit.isSliced) {
-        // Draw whole fruit
-        final paint = Paint()..color = fruit.color;
-        
-        // Save canvas state before rotation
-        canvas.save();
-        
-        // Translate to fruit position, rotate, and draw
-        canvas.translate(fruit.position.dx, fruit.position.dy);
-        canvas.rotate(fruit.rotation);
-        
-        // Draw the fruit (circle for now, could be replaced with image)
-        canvas.drawCircle(Offset.zero, fruit.radius, paint);
-        
-        // Add a little highlight
-        final highlightPaint = Paint()
-          ..color = Colors.white.withOpacity(0.3)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0;
-        canvas.drawCircle(Offset(-fruit.radius * 0.3, -fruit.radius * 0.3), 
-                         fruit.radius * 0.6, highlightPaint);
-        
-        // Restore canvas state
-        canvas.restore();
-      } else {
-        // Draw sliced halves
-        for (var half in fruit.slicedHalves) {
-          final paint = Paint()..color = FruitModel.fruitColors[half.type] ?? Colors.white;
-          
+      final double diameter = fruit.radius * 2;
+      final String imagePath = _getFruitImagePath(fruit.type);
+      
+      final ui.Image? image = imageCache[imagePath];
+      final Size? imageSize = imageSizeCache[imagePath];
+
+      if (image != null && imageSize != null && imageSize.width > 0 && imageSize.height > 0) {
+        final Rect srcRect = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
+        final Rect dstRect = Rect.fromCenter(center: fruit.position, width: diameter, height: diameter);
+
+        if (!fruit.isSliced) {
           canvas.save();
-          canvas.translate(half.position.dx, half.position.dy);
-          canvas.rotate(half.rotation);
-          
-          // For sliced halves, draw half-circles
-          final rect = Rect.fromCircle(center: Offset.zero, radius: fruit.radius);
-          
-          if (half.isLeftHalf) {
-            // Left half
-            canvas.drawPath(
-              Path()
-                ..addArc(rect, -pi/2, pi),
-              paint,
-            );
-          } else {
-            // Right half
-            canvas.drawPath(
-              Path()
-                ..addArc(rect, pi/2, pi),
-              paint,
-            );
-          }
-          
+          canvas.translate(dstRect.center.dx, dstRect.center.dy);
+          canvas.rotate(fruit.rotation);
+          canvas.translate(-dstRect.center.dx, -dstRect.center.dy);
+          canvas.drawImageRect(image, srcRect, dstRect, paint);
           canvas.restore();
+        } else {
+          // --- Draw Sliced Halves using Canvas Clipping --- //
+          for (var half in fruit.slicedHalves) {
+            final double currentFruitRotation = half.rotation; // Fruit's current rotation
+
+            // Get base fruit image details
+            final String imagePath = _getFruitImagePath(fruit.type);
+            final ui.Image? image = imageCache[imagePath];
+            final Size? imageSize = imageSizeCache[imagePath];
+            
+            if (image != null && imageSize != null && imageSize.width > 0 && imageSize.height > 0) {
+              final double diameter = fruit.radius * 2;
+
+              // --- Calculate Net Angle --- 
+              final double netAngle = currentFruitRotation - half.cutAngle;
+
+              // --- Determine Display Cut Angle (Radians, 0 or pi/2) --- //
+              int displayCutAngle;
+              final normalizedAngle = (netAngle % (2 * pi) + 2 * pi) % (2 * pi);
+              const double piOver4 = pi / 4.0;
+              const double threePiOver4 = 3 * pi / 4.0;
+              const double fivePiOver4 = 5 * pi / 4.0;
+              const double sevenPiOver4 = 7 * pi / 4.0;
+
+              // Check if angle is closer to horizontal axis (0 or pi radians)
+              if ((normalizedAngle > sevenPiOver4 || normalizedAngle <= piOver4) || 
+                  (normalizedAngle > threePiOver4 && normalizedAngle <= fivePiOver4)) {
+                displayCutAngle = 1; // Horizontal cut
+              } else { 
+                displayCutAngle = 0; // Vertical cut
+              }
+
+              // Rects for drawing the full image
+              final Rect fullSrcRect = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
+              final Rect localDstRect = Rect.fromCenter(center: Offset.zero, width: diameter, height: diameter);
+
+              canvas.save();
+              // 1. Translate to the half's center
+              canvas.translate(half.position.dx, half.position.dy);
+              // 2. Rotate by the half's individual rotation (spin)
+              canvas.rotate(currentFruitRotation);
+              // 3. Rotate AGAIN by the display cut angle for final orientation
+              //canvas.rotate(displayCutAngle);
+
+              // --- 4. Define and Apply Clipping --- 
+              // Define a rectangle covering the half we WANT to show in the *current* rotated system.
+              // Use slight overlap to avoid gaps.
+              final Rect halfRectToShow = displayCutAngle == 0 ? Rect.fromLTWH(
+                half.isPrimaryHalf ? -diameter * 0.505 : -diameter * 0.005, // x: Start left edge for primary, near center for secondary
+                -diameter * 0.505,                                        // y: Start slightly above top
+                diameter * 0.51,                                          // width: Slightly more than half
+                diameter * 1.01                                           // height: Slightly more than full height
+              ) : Rect.fromLTWH(
+                -diameter * 0.505, // x: Start left edge for primary, near center for secondary
+                half.isPrimaryHalf ? -diameter * 0.505 : -diameter * 0.005,                                        // y: Start slightly above top                                          // width: Slightly more than full
+                diameter * 1.01,
+                diameter * 0.51                                           // height: Slightly more than half
+              );
+              final Path clipPath = Path()..addRect(halfRectToShow);
+              // Apply the clip IN THE CURRENT (rotated) coordinate system
+              canvas.clipPath(clipPath); 
+              // --- End Clipping --- 
+
+              // 5. Draw the *ENTIRE* fruit image; clipping will hide the unwanted half
+              // The image is drawn centered at the origin of the current coordinate system.
+              canvas.drawImageRect(image, fullSrcRect, localDstRect, paint);
+
+              canvas.restore(); // Restore translation and all rotations
+            } else {
+               // Draw placeholder if base image not loaded (shouldn't happen often here)
+               final Paint placeholderPaint = Paint()..color = Colors.grey.withOpacity(0.7);
+               canvas.drawCircle(half.position, fruit.radius, placeholderPaint);
+               if (image == null) print('Warning: Base image $imagePath not found for sliced half.');
+            }
+          }
+          // --- End Sliced Halves Drawing --- //
         }
+      } else {
+        // Draw placeholder if image not loaded yet (or failed)
+        final Paint placeholderPaint = Paint()..color = Colors.grey;
+        canvas.drawCircle(fruit.position, fruit.radius, placeholderPaint);
+        print('Warning: Image $imagePath not found in cache during paint.');
       }
     }
-    
-    // Draw slice trail
+
+    // Draw slice trail (existing code)
     if (slicePoints.length > 1) {
-      final slicePaint = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 3.0
-        ..strokeCap = StrokeCap.round
-        ..style = PaintingStyle.stroke;
-      
-      // Create a path from slice points
-      final path = Path();
-      path.moveTo(slicePoints[0].dx, slicePoints[0].dy);
-      
-      for (int i = 1; i < slicePoints.length; i++) {
-        path.lineTo(slicePoints[i].dx, slicePoints[i].dy);
-      }
-      
-      // Draw the slice path
-      canvas.drawPath(path, slicePaint);
-      
-      // Add a glow effect
-      final glowPaint = Paint()
-        ..color = Colors.blue.withOpacity(0.5)
-        ..strokeWidth = 6.0
-        ..strokeCap = StrokeCap.round
-        ..style = PaintingStyle.stroke
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
-      
-      canvas.drawPath(path, glowPaint);
+         final slicePaint = Paint()
+          ..color = Colors.white
+          ..strokeWidth = 3.0
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
+        
+        final path = Path();
+        path.moveTo(slicePoints[0].dx, slicePoints[0].dy);
+        for (int i = 1; i < slicePoints.length; i++) {
+          path.lineTo(slicePoints[i].dx, slicePoints[i].dy);
+        }
+        canvas.drawPath(path, slicePaint);
+        
+        final glowPaint = Paint()
+          ..color = Colors.blue.withOpacity(0.5)
+          ..strokeWidth = 6.0
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
+        canvas.drawPath(path, glowPaint);
     }
   }
-  
+
   @override
   bool shouldRepaint(covariant GamePainter oldDelegate) {
-    return oldDelegate.fruits != fruits || 
-           oldDelegate.slicePoints != slicePoints;
+    return oldDelegate.fruits != fruits ||
+           oldDelegate.slicePoints != slicePoints ||
+           !mapEquals(oldDelegate.imageCache, imageCache) || // Compare caches
+           !mapEquals(oldDelegate.imageSizeCache, imageSizeCache);
   }
 }
 
@@ -779,4 +915,14 @@ class HeartPainter extends CustomPainter {
   bool shouldRepaint(covariant HeartPainter oldDelegate) {
     return quarters != oldDelegate.quarters;
   }
-} 
+}
+
+// --- Fruit Path Generation Functions --- [REMOVE ALL FUNCTIONS BELOW THIS LINE] 
+
+// Path getPathForBanana(Size targetSize) { ... }
+// Path getPathForApple(Size targetSize) { ... }
+// Path getPathForPeach(Size targetSize) { ... }
+// Path getPathForWatermelon(Size targetSize) { ... }
+// Path getPathForOrange(Size targetSize) { ... }
+// Path getPathForBomb(Size targetSize) { ... }
+// Path getFruitPath(FruitType type, Size targetSize) { ... } 

@@ -244,31 +244,42 @@ class GameManager {
     for (var fruit in fruits) {
       fruit.update(dt, screenSize);
 
-      // Check if fruit has fallen off screen
-      if (fruit.isOffScreen(screenSize)) {
-        fruitsToRemove.add(fruit);
+      if (fruit.isSliced) {
+        for (var half in fruit.slicedHalves) {
+          half.update(dt);
+        }
+        // Check if sliced halves are off screen and remove them from the fruit's list
+        fruit.slicedHalves.removeWhere((half) => half.isOffScreen(screenSize));
+        // If a sliced fruit has no more halves visible, mark the *fruit* for removal
+        if (fruit.slicedHalves.isEmpty) {
+          fruitsToRemove.add(fruit);
+        }
+      } else {
+        // Check if unsliced fruit has fallen off screen
+        if (fruit.isOffScreen(screenSize)) {
+          fruitsToRemove.add(fruit);
 
-        // Deduct quarter of a life for missed fruits (only if not already sliced and not a bomb)
-        if (!fruit.isSliced && fruit.type != FruitType.bomb) {
-          _assetsManager.playSound('miss');
+          // Deduct life for missed fruits (only if not a bomb)
+          if (fruit.type != FruitType.bomb) {
+            _assetsManager.playSound('miss');
+            double oldLives = lives;
+            lives = max(0, lives - 0.25); // Deduct quarter of a heart
+            livesNotifier.value = lives;
 
-          double oldLives = lives;
-          lives = max(0, lives - 0.25); // Deduct quarter of a heart
-          livesNotifier.value = lives;
+            // Show warning notifications based on health level
+            if (lives <= 0.5 && oldLives > 0.5) {
+              showNotification('⚠️ Critical Health! ⚠️');
+            } else if (lives <= 1.0 && oldLives > 1.0) {
+              showNotification('⚠️ Low Health! ⚠️');
+            } else if (lives <= 2.0 && oldLives > 2.0) {
+              showNotification('Careful! Missing fruits costs health!');
+            }
 
-          // Show warning notifications based on health level
-          if (lives <= 0.5 && oldLives > 0.5) {
-            showNotification('⚠️ Critical Health! ⚠️');
-          } else if (lives <= 1.0 && oldLives > 1.0) {
-            showNotification('⚠️ Low Health! ⚠️');
-          } else if (lives <= 2.0 && oldLives > 2.0) {
-            showNotification('Careful! Missing fruits costs health!');
-          }
-
-          // Check for game over
-          if (lives <= 0) {
-            showNotification('Game Over - Too Many Missed Fruits!');
-            gameOver();
+            // Check for game over
+            if (lives <= 0) {
+              showNotification('Game Over - Too Many Missed Fruits!');
+              gameOver();
+            }
           }
         }
       }
@@ -287,7 +298,7 @@ class GameManager {
 
     for (var fruit in fruits) {
       if (!fruit.isSliced && fruit.isSlicedByLine(sliceSegment)) {
-        // Slice the fruit
+        // Slice the fruit - NO angle needed here anymore
         fruit.slice(sliceDirection);
 
         if (fruit.type == FruitType.bomb) {

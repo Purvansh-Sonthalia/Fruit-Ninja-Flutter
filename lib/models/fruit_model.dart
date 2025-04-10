@@ -39,6 +39,16 @@ class FruitModel {
     FruitType.bomb: Colors.black,
   };
   
+  // Highlight colors for gradients/shading
+  static const Map<FruitType, Color> fruitHighlightColors = {
+    FruitType.apple: Color(0xFFFFCDD2), // Lighter red/pink
+    FruitType.orange: Color(0xFFFFE0B2), // Lighter orange
+    FruitType.watermelon: Color(0xFFC8E6C9), // Lighter green
+    FruitType.banana: Color(0xFFFFF9C4), // Lighter yellow
+    FruitType.peach: Color(0xFFF8BBD0), // Lighter pink
+    FruitType.bomb: Colors.grey, // Grey highlight for bomb
+  };
+
   // Default score values
   static const Map<FruitType, int> fruitScores = {
     FruitType.apple: 1,
@@ -82,6 +92,9 @@ class FruitModel {
   // Get fruit color
   Color get color => fruitColors[type] ?? Colors.white;
   
+  // Get fruit highlight color
+  Color get highlightColor => fruitHighlightColors[type] ?? Colors.grey[300]!;
+  
   // Get fruit image name
   String get imageName => fruitImages[type] ?? 'apple';
   
@@ -91,30 +104,34 @@ class FruitModel {
     
     isSliced = true;
     
-    // Create two halves with slightly different velocities based on slice direction
+    // Calculate the angle of the slice for determining half orientation
+    final double cutAngle = sliceDirection.direction;
+    // Calculate a vector perpendicular to the slice for separation
     final perpendicular = Offset(-sliceDirection.dy, sliceDirection.dx).normalized();
-    
-    // Left/top half
+    const double separationForce = 150.0; // Speed at which halves separate
+
+    // Create two halves 
     slicedHalves.add(
       SlicedHalf(
         position: position,
-        velocity: velocity + perpendicular * 100,
-        rotation: rotation,
-        rotationSpeed: rotationSpeed * 1.5,
-        isLeftHalf: true,
+        velocity: perpendicular * separationForce, // Velocity is ONLY separation
+        initialRotation: rotation, 
+        rotationSpeed: rotationSpeed, // Use original fruit rotation speed
         type: type,
+        cutAngle: cutAngle, 
+        isPrimaryHalf: true, 
       )
     );
     
-    // Right/bottom half
     slicedHalves.add(
       SlicedHalf(
-        position: position,
-        velocity: velocity - perpendicular * 100,
-        rotation: rotation,
-        rotationSpeed: rotationSpeed * 1.5,
-        isLeftHalf: false,
+        position: position, 
+        velocity: -perpendicular * separationForce, // Velocity is ONLY separation (opposite dir)
+        initialRotation: rotation, 
+        rotationSpeed: rotationSpeed, // Use original fruit rotation speed
         type: type,
+        cutAngle: cutAngle,
+        isPrimaryHalf: false,
       )
     );
   }
@@ -141,25 +158,35 @@ class SlicedHalf {
   Offset velocity;
   double rotation;
   double rotationSpeed;
-  bool isLeftHalf; // Whether this is the left/top half
   FruitType type;
-  
+  double cutAngle; // Angle of the original cut (for drawing)
+  bool isPrimaryHalf; // To distinguish which half for drawing
+  double timeAlive = 0.0; // Track how long the half has existed
+
   SlicedHalf({
     required this.position,
     required this.velocity,
-    required this.rotation,
+    required double initialRotation,
     required this.rotationSpeed,
-    required this.isLeftHalf,
     required this.type,
-  });
+    required this.cutAngle,
+    required this.isPrimaryHalf,
+  }) : rotation = initialRotation; // Initialize rotation
   
   void update(double dt) {
-    // Apply gravity and update position - reduced from 980 to 800 for consistency
-    velocity = velocity + Offset(0, 800 * dt);
+    // Apply gravity and update position
+    velocity = velocity + Offset(0, 800 * dt); // Use consistent gravity
     position = position + velocity * dt;
     
     // Update rotation
     rotation += rotationSpeed * dt;
+    timeAlive += dt;
+  }
+  
+  // Check if the half is off-screen or has lived too long
+  bool isOffScreen(Size screenSize) {
+      // Remove if below screen OR after 3 seconds to prevent lingering pieces
+      return position.dy > screenSize.height + 50 || timeAlive > 3.0;
   }
 }
 
