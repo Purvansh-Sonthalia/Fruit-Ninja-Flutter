@@ -33,6 +33,7 @@ class AuthService extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
+      print('Sign-in error: $e');
       _isLoading = false;
       notifyListeners();
       return false;
