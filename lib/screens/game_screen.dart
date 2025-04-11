@@ -23,6 +23,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   // Cache for loaded Images (dart:ui Image)
   final Map<String, ui.Image> _imageCache = {};
   final Map<String, Size> _imageSizeCache = {}; // Store original image sizes
+  bool _gameStarted = false; // Flag to ensure startGame is called only once per instance
 
   @override
   void initState() {
@@ -40,11 +41,22 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     setState(() {
       _isLoading = true;
     });
-    await _gameManager.init();
+    // Reset game manager state before init (optional but good practice)
+    // If GameManager is a singleton, ensure its state is clean before reuse.
+    // _gameManager.reset(); // Assuming a reset method exists or add one if needed.
+    await _gameManager.init(); // Loads high score etc.
     if (mounted) {
       setState(() {
         _isLoading = false;
       });
+      // Try starting the game if screen size is already known and game hasn't started
+      if (_gameManager.screenSize != Size.zero && !_gameStarted) {
+        print("Starting game from _initGameManager"); // Debug log
+        _gameManager.startGame(_gameManager.screenSize);
+        _gameStarted = true;
+      } else if (_gameManager.screenSize == Size.zero) {
+          print("_initGameManager finished, waiting for screen size..."); // Debug log
+      }
     }
   }
 
@@ -53,20 +65,33 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     super.didChangeDependencies();
     final size = MediaQuery.of(context).size;
     if (size.width > 0 && size.height > 0) {
-      _gameManager.screenSize = size;
+        // Update size if it changed or wasn't set initially
+        if (_gameManager.screenSize != size) {
+             print("Screen size determined/changed: $size"); // Debug log
+             _gameManager.screenSize = size;
+        }
+      // Start the game if initialized, size is known, and not already started
+      if (!_isLoading && !_gameStarted) {
+        print("Starting game from didChangeDependencies"); // Debug log
+        _gameManager.startGame(size);
+        _gameStarted = true;
+      }
+    } else {
+        print("didChangeDependencies called with invalid size: $size"); // Debug log
     }
   }
 
   @override
   void dispose() {
+    print("Disposing GameScreen"); // Debug log
     _controller.dispose();
-    _gameManager.dispose();
-    // Dispose images? Usually not necessary as they are managed by ImageCache
+    // Consider if GameManager needs explicit reset/cleanup if it's a singleton
+    // _gameManager.dispose(); // Call dispose if GameManager holds resources like timers
     super.dispose();
   }
 
   void _gameLoop() {
-    if (!mounted) return;
+    if (!mounted || _isLoading || !_gameStarted) return; // Ensure game has started
     
     // Calculate time delta in seconds
     final dt = _controller.duration!.inMilliseconds / 1000.0;
@@ -131,7 +156,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     
     // Custom heart with partial fill based on quarters
     return SizedBox(
-      width: 32,
+      width: 28,
       height: 30,
       child: CustomPaint(
         painter: HeartPainter(quarters: quarters),
@@ -698,23 +723,23 @@ class GamePainter extends CustomPainter {
               final double diameter = fruit.radius * 2;
 
               // --- Calculate Net Angle --- 
-              final double netAngle = currentFruitRotation - half.cutAngle;
+              final double netAngle = half.cutAngle;
 
               // --- Determine Display Cut Angle (Radians, 0 or pi/2) --- //
-              int displayCutAngle;
+              //int displayCutAngle;
               final normalizedAngle = (netAngle % (2 * pi) + 2 * pi) % (2 * pi);
-              const double piOver4 = pi / 4.0;
-              const double threePiOver4 = 3 * pi / 4.0;
-              const double fivePiOver4 = 5 * pi / 4.0;
-              const double sevenPiOver4 = 7 * pi / 4.0;
+              //const double piOver4 = pi / 4.0;
+              //const double threePiOver4 = 3 * pi / 4.0;
+              //const double fivePiOver4 = 5 * pi / 4.0;
+              //const double sevenPiOver4 = 7 * pi / 4.0;
 
               // Check if angle is closer to horizontal axis (0 or pi radians)
-              if ((normalizedAngle > sevenPiOver4 || normalizedAngle <= piOver4) || 
-                  (normalizedAngle > threePiOver4 && normalizedAngle <= fivePiOver4)) {
-                displayCutAngle = 1; // Horizontal cut
-              } else { 
-                displayCutAngle = 0; // Vertical cut
-              }
+              //if ((normalizedAngle > sevenPiOver4 || normalizedAngle <= piOver4) || 
+              //    (normalizedAngle > threePiOver4 && normalizedAngle <= fivePiOver4)) {
+              //  displayCutAngle = 1; // Horizontal cut
+              //} else { 
+              //  displayCutAngle = 0; // Vertical cut
+              //}
 
               // Rects for drawing the full image
               final Rect fullSrcRect = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
@@ -729,26 +754,29 @@ class GamePainter extends CustomPainter {
               //canvas.rotate(displayCutAngle);
 
               // --- 4. Define and Apply Clipping --- 
-              // Define a rectangle covering the half we WANT to show in the *current* rotated system.
-              // Use slight overlap to avoid gaps.
-              final Rect halfRectToShow = displayCutAngle == 0 ? Rect.fromLTWH(
-                half.isPrimaryHalf ? -diameter * 0.505 : -diameter * 0.005, // x: Start left edge for primary, near center for secondary
-                -diameter * 0.505,                                        // y: Start slightly above top
-                diameter * 0.51,                                          // width: Slightly more than half
-                diameter * 1.01                                           // height: Slightly more than full height
-              ) : Rect.fromLTWH(
-                -diameter * 0.505, // x: Start left edge for primary, near center for secondary
-                half.isPrimaryHalf ? -diameter * 0.505 : -diameter * 0.005,                                        // y: Start slightly above top                                          // width: Slightly more than full
-                diameter * 1.01,
-                diameter * 0.51                                           // height: Slightly more than half
-              );
-              final Path clipPath = Path()..addRect(halfRectToShow);
+              // Define a path representing the SEMICIRCLE we want to show.
+              final Path clipPath = Path();
+              double startAngle;
+              const double sweepAngle = pi; // Half circle
+
+
+              startAngle = half.isPrimaryHalf ? normalizedAngle : normalizedAngle + pi;
+              //if (displayCutAngle == 0) { // Horizontal cut requested (Cut runs Vertically)
+              //  startAngle = half.isPrimaryHalf ? pi / 2 : -pi / 2; // Left half starts at 90deg, Right at -90deg
+              //} else { // Vertical cut requested (Cut runs Horizontally, displayCutAngle == pi / 2)
+              //  startAngle = half.isPrimaryHalf ? pi : 0; // Bottom half starts at 180deg, Top at 0deg
+              //}
+              
+              // Add the arc segment to the path
+              clipPath.arcTo(localDstRect, startAngle, sweepAngle, true);
+              // Add the diameter line to close the D-shape
+              clipPath.close();
+
               // Apply the clip IN THE CURRENT (rotated) coordinate system
               canvas.clipPath(clipPath); 
               // --- End Clipping --- 
 
               // 5. Draw the *ENTIRE* fruit image; clipping will hide the unwanted half
-              // The image is drawn centered at the origin of the current coordinate system.
               canvas.drawImageRect(image, fullSrcRect, localDstRect, paint);
 
               canvas.restore(); // Restore translation and all rotations
