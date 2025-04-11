@@ -5,6 +5,8 @@ import '../services/auth_service.dart';
 import 'dart:developer'; // For logging
 import 'dart:convert'; // Required for base64Decode, jsonDecode
 import 'dart:typed_data'; // Required for Uint8List
+import 'dart:ui' as ui; // Import for ui.Image
+import 'dart:async'; // Import for Completer
 import 'create_post_screen.dart'; // Import the new screen
 
 // Define a model for the Post data for better type safety
@@ -123,30 +125,87 @@ class PostImageViewer extends StatefulWidget {
   State<PostImageViewer> createState() => _PostImageViewerState();
 }
 
+// Reintroduce PageController for multiple images & Add dynamic aspect ratio logic
 class _PostImageViewerState extends State<PostImageViewer> {
   late PageController _pageController;
   int _currentPage = 0;
 
+  // State for dynamic aspect ratio calculation
+  bool _isCalculatingSize = false;
+  double? _calculatedAspectRatio;
+  static const double _defaultAspectRatio = 16 / 9;
+
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
-    _pageController.addListener(() {
-      if (_pageController.page?.round() != _currentPage) {
-        setState(() {
-          _currentPage = _pageController.page!.round();
-        });
+    // Initialize PageController only if there are multiple images
+    if (widget.imageList.length > 1) {
+      _pageController = PageController();
+      _pageController.addListener(() {
+        final newPage = _pageController.page?.round();
+        if (newPage != null && newPage != _currentPage) {
+          setState(() {
+            _currentPage = newPage;
+          });
+        }
+      });
+      // Start aspect ratio calculation for multiple images
+      _calculateAndSetMaxAspectRatio();
+    }
+  }
+
+  Future<void> _calculateAndSetMaxAspectRatio() async {
+    if (!mounted) return;
+    setState(() {
+      _isCalculatingSize = true;
+    });
+
+    double minAspectRatio = _defaultAspectRatio; // Start with default
+    bool foundValidImage = false;
+
+    for (int i = 0; i < widget.imageList.length; i++) {
+      final imageBytes = _getDecodedImageBytes(i);
+      if (imageBytes != null) {
+        try {
+          final completer =
+              Completer<ui.Image>(); // Use Completer from dart:async
+          ui.decodeImageFromList(imageBytes, completer.complete);
+          final ui.Image imageInfo = await completer.future;
+
+          if (imageInfo.height > 0) {
+            final aspectRatio = imageInfo.width / imageInfo.height;
+            if (!foundValidImage || aspectRatio < minAspectRatio) {
+              minAspectRatio = aspectRatio;
+              foundValidImage = true;
+            }
+          }
+        } catch (e) {
+          log(
+            'Error decoding image $i for aspect ratio calculation (post ${widget.postId}): $e',
+          );
+          // Ignore this image for calculation, continue with others
+        }
       }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      // Use calculated only if we successfully processed at least one image
+      _calculatedAspectRatio = foundValidImage ? minAspectRatio : null;
+      _isCalculatingSize = false;
     });
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    // Dispose PageController only if it was initialized
+    if (widget.imageList.length > 1) {
+      _pageController.dispose();
+    }
     super.dispose();
   }
 
-  // Helper to decode bytes, same logic as before but instance method now
+  // Helper to decode bytes, remains the same
   Uint8List? _getDecodedImageBytes(int index) {
     if (index >= 0 && index < widget.imageList.length) {
       final imageData = widget.imageList[index];
@@ -165,117 +224,156 @@ class _PostImageViewerState extends State<PostImageViewer> {
     return null;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final imageCount = widget.imageList.length;
-    return AspectRatio(
-      aspectRatio: 16 / 9, // Or your desired aspect ratio
-      child: Stack(
-        children: [
-          PageView.builder(
-            controller: _pageController,
-            itemCount: imageCount,
-            itemBuilder: (context, pageIndex) {
-              final imageBytes = _getDecodedImageBytes(pageIndex);
-              if (imageBytes != null) {
-                // Wrap Image.memory with GestureDetector for tap-to-zoom
-                return GestureDetector(
-                  onTap: () {
-                    // Show the zoomed image in a Dialog
-                    showDialog(
-                      context: context,
-                      builder:
-                          (_) => Dialog(
-                            backgroundColor: Colors.transparent,
-                            insetPadding: const EdgeInsets.all(10),
-                            child: GestureDetector(
-                              // Tap again to close the dialog
-                              onTap: () => Navigator.of(context).pop(),
-                              child: InteractiveViewer(
-                                panEnabled: true,
-                                boundaryMargin: const EdgeInsets.all(20),
-                                minScale: 0.5,
-                                maxScale: 4.0,
-                                child: Center(
-                                  child: Image.memory(
-                                    imageBytes, // Use the same image bytes
-                                    fit: BoxFit.contain,
-                                    errorBuilder:
-                                        (ctx, err, st) => const Icon(
-                                          Icons.broken_image,
-                                          size: 100,
-                                          color: Colors.white70,
-                                        ),
-                                  ),
-                                ),
-                              ),
+  // --- Helper Function for Single Image Display (with zoom) ---
+  Widget _buildSingleImage(Uint8List imageBytes) {
+    return GestureDetector(
+      onTap: () {
+        // Show the zoomed image in a Dialog
+        showDialog(
+          context: context,
+          builder:
+              (_) => Dialog(
+                backgroundColor: Colors.transparent,
+                insetPadding: const EdgeInsets.all(10),
+                child: GestureDetector(
+                  // Tap again to close the dialog
+                  onTap: () => Navigator.of(context).pop(),
+                  child: InteractiveViewer(
+                    panEnabled: true,
+                    boundaryMargin: const EdgeInsets.all(20),
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: Center(
+                      child: Image.memory(
+                        imageBytes, // Use the same image bytes
+                        fit: BoxFit.contain,
+                        errorBuilder:
+                            (ctx, err, st) => const Icon(
+                              Icons.broken_image,
+                              size: 100,
+                              color: Colors.white70,
                             ),
-                          ),
-                    );
-                  },
-                  child: Image.memory(
-                    imageBytes,
-                    fit: BoxFit.contain,
-                    gaplessPlayback: true,
-                    errorBuilder: (context, error, stackTrace) {
-                      log(
-                        'Error displaying image $pageIndex for post ${widget.postId}: $error',
-                      );
-                      return Container(
-                        color: Colors.black26,
-                        child: const Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: Colors.white70,
-                            size: 50,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                );
-              } else {
-                // Placeholder for decoding errors
-                return Container(
-                  color: Colors.black26,
-                  child: const Center(
-                    child: Icon(
-                      Icons.error_outline,
-                      color: Colors.white70,
-                      size: 50,
+                      ),
                     ),
-                  ),
-                );
-              }
-            },
-          ),
-          // Page Indicator (only show if more than one image)
-          if (imageCount > 1)
-            Positioned(
-              bottom: 8.0,
-              right: 8.0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8.0,
-                  vertical: 4.0,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(10.0),
-                ),
-                child: Text(
-                  '${_currentPage + 1} / $imageCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.0,
-                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
+        );
+      },
+      child: Image.memory(
+        imageBytes,
+        fit: BoxFit.contain, // Use contain to maintain aspect ratio
+        gaplessPlayback: true, // Smoother loading
+        errorBuilder: (context, error, stackTrace) {
+          log(
+            'Error displaying single image for post ${widget.postId}: $error',
+          );
+          // Display a placeholder on error
+          return Container(
+            // Give error placeholder a reasonable height
+            height: 150,
+            color: Colors.black26,
+            child: const Center(
+              child: Icon(Icons.broken_image, color: Colors.white70, size: 50),
             ),
-        ],
+          );
+        },
       ),
     );
+  }
+  // --- End Single Image Helper ---
+
+  @override
+  Widget build(BuildContext context) {
+    final imageCount = widget.imageList.length;
+
+    // Handle cases: 0, 1, or multiple images
+    if (imageCount == 0) {
+      return const SizedBox.shrink();
+    } else if (imageCount == 1) {
+      // Display single image directly (no aspect ratio calculation needed)
+      final imageBytes = _getDecodedImageBytes(0);
+      if (imageBytes != null) {
+        return _buildSingleImage(imageBytes);
+      } else {
+        // Error placeholder for the single image
+        return Container(
+          height: 150,
+          color: Colors.black26,
+          child: const Center(
+            child: Icon(Icons.error_outline, color: Colors.white70, size: 50),
+          ),
+        );
+      }
+    } else {
+      // Multiple images: Use PageView with calculated or default AspectRatio
+      Widget pageViewContent;
+      if (_isCalculatingSize) {
+        // Show placeholder while calculating
+        pageViewContent = const AspectRatio(
+          aspectRatio: _defaultAspectRatio,
+          child: Center(
+            child: CircularProgressIndicator(color: Colors.white70),
+          ),
+        );
+      } else {
+        // Use calculated aspect ratio if available, otherwise default
+        pageViewContent = AspectRatio(
+          aspectRatio: _calculatedAspectRatio ?? _defaultAspectRatio,
+          child: Stack(
+            children: [
+              PageView.builder(
+                controller: _pageController,
+                itemCount: imageCount,
+                itemBuilder: (context, pageIndex) {
+                  final imageBytes = _getDecodedImageBytes(pageIndex);
+                  if (imageBytes != null) {
+                    // Use the single image builder for zoom etc.
+                    return _buildSingleImage(imageBytes);
+                  } else {
+                    // Placeholder for decoding errors within PageView
+                    return Container(
+                      color: Colors.black26,
+                      child: const Center(
+                        child: Icon(
+                          Icons.error_outline,
+                          color: Colors.white70,
+                          size: 50,
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+              // Page Indicator
+              Positioned(
+                bottom: 8.0,
+                right: 8.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 4.0,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(10.0),
+                  ),
+                  child: Text(
+                    '${_currentPage + 1} / $imageCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.0,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return pageViewContent; // Return either placeholder or the sized PageView
+    }
   }
 }
 // --- End Image Viewer Widget ---
@@ -353,20 +451,25 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Allow body to extend behind the AppBar
+      extendBodyBehindAppBar: true,
+      // Restore AppBar but make it transparent
       appBar: AppBar(
-        title: const Text('Community Feed'),
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF4682B4), Color(0xFF87CEEB)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
+        title: const Text(
+          'Community Feed',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
+        // Make AppBar transparent
+        backgroundColor: Colors.transparent,
+        // Remove shadow
         elevation: 0,
+        // Keep default back button (leading)
       ),
       body: Container(
+        // Ensure the gradient covers the whole screen
+        // The SafeArea might be implicitly handled by Scaffold,
+        // but if status bar overlap is an issue, we might need
+        // to adjust padding within the body later.
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -430,6 +533,10 @@ class _FeedScreenState extends State<FeedScreen> {
                 });
               },
               child: ListView.builder(
+                // Add cacheExtent to build items further offscreen
+                cacheExtent:
+                    MediaQuery.of(context).size.height *
+                    1.5, // Cache 1.5 screens worth of items
                 padding: const EdgeInsets.all(8.0),
                 itemCount: posts.length,
                 itemBuilder: (context, index) {

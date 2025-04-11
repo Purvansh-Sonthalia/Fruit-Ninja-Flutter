@@ -6,6 +6,8 @@ import 'dart:developer';
 import 'dart:io'; // Required for File
 import 'dart:convert'; // Required for base64Encode, jsonEncode
 import 'package:image_picker/image_picker.dart'; // Import image_picker
+import 'package:http/http.dart' as http; // Import http package
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
@@ -133,6 +135,65 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  // --- Send Reminder Notification ---
+  Future<void> _sendReminderNotification(
+    String textContent,
+    bool hasImages,
+  ) async {
+    // Access the backend URL from environment variables
+    final String? backendBaseUrl = dotenv.env['BACKEND_URL'];
+
+    if (backendBaseUrl == null) {
+      log('Error: BACKEND_URL not found in .env file.');
+      // Optionally show an error or handle this case
+      return;
+    }
+
+    final String backendUrl =
+        '$backendBaseUrl/api/send-reminder'; // Construct the full URL
+    String title = 'New Post Created!';
+    String body;
+
+    if (textContent.isNotEmpty) {
+      body =
+          textContent.length > 100
+              ? '${textContent.substring(0, 97)}...' // Truncate long text
+              : textContent;
+      if (hasImages) {
+        body += ' (+ images)';
+      }
+    } else if (hasImages) {
+      body = 'A new post with images was added.';
+    } else {
+      // This case should ideally not happen based on _submitPost validation
+      log('Attempted to send reminder for an empty post.');
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse(backendUrl),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(<String, String>{'title': title, 'body': body}),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        log('Reminder notification sent successfully.');
+      } else {
+        log(
+          'Failed to send reminder notification. Status: ${response.statusCode}, Body: ${response.body}',
+        );
+        // Optionally show an error to the user, but maybe not critical path?
+        // _showErrorSnackBar('Could not send reminder notification.');
+      }
+    } catch (e) {
+      log('Error sending reminder notification: $e');
+      // Optionally show an error to the user
+      // _showErrorSnackBar('Error sending reminder: ${e.toString()}');
+    }
+  }
+  // --- End Send Reminder Notification ---
+
   Future<void> _submitPost() async {
     final textContent = _postTextController.text.trim();
     final authService = Provider.of<AuthService>(context, listen: false);
@@ -198,6 +259,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       if (mounted) {
         _showSuccessSnackBar('Post created successfully!');
+        // Call the reminder function AFTER successful post creation
+        _sendReminderNotification(
+          textContent,
+          _selectedImages.isNotEmpty,
+        ); // Pass content info
         Navigator.pop(context, true); // Indicate success
       }
     } on PostgrestException catch (e) {
