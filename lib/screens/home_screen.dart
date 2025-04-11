@@ -170,29 +170,35 @@ class HomeScreen extends StatelessWidget {
                   tooltip: 'Weather',
                 ),
               ),
-              // Feed Icon Button (Next to Weather)
-              Positioned(
-                top: edgePadding, // Align with other top icons
-                right:
-                    edgePadding +
-                    iconSize +
-                    (edgePadding / 2), // Position left of weather icon
-                child: IconButton(
-                  icon: Icon(
-                    Icons.feed, // Using the feed icon
-                    color: Colors.white, // Matching other icons
-                    size: iconSize, // Use responsive size
-                  ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const FeedScreen(),
+               // Feed Icon Button (Next to Weather)
+              Consumer<AuthService>(
+                builder: (context, authService, _) {
+                  if (authService.isLoggedIn == false) {
+                    return SizedBox.shrink();
+                  }
+                  return Positioned(
+                    top: edgePadding, // Align with other top icons
+                    right: edgePadding +
+                        iconSize +
+                        (edgePadding / 2), // Position left of weather icon
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.feed, // Using the feed icon
+                        color: Colors.white, // Matching other icons
+                        size: iconSize, // Use responsive size
                       ),
-                    );
-                  },
-                  tooltip: 'Feeds', // Add a tooltip
-                ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const FeedScreen(),
+                          ),
+                        );
+                      },
+                      tooltip: 'Feeds', // Add a tooltip
+                    ),
+                  );
+                },
               ),
               // --- End Icons ---
             ],

@@ -151,6 +151,7 @@ class AssetsManager with ChangeNotifier {
   }
 
   // Clean up resources
+  @override
   void dispose() {
     slicePlayer.dispose();
     missPlayer.dispose();

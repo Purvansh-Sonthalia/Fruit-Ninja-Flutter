@@ -72,7 +72,6 @@ class MyApp extends StatelessWidget {
             seedColor: Colors.deepPurple,
             brightness: Brightness.dark,
           ),
-          useMaterial3: true,
         ),
         themeMode: ThemeMode.dark,
         home: const HomeScreen(),

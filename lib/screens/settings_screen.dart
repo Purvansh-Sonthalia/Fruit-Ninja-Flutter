@@ -95,7 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             min: 0.0,
             max: 1.0,
             divisions: 10, // Optional: 10 steps
-            label: (value * 100).toStringAsFixed(0) + '%', // Show percentage
+            label: '${(value * 100).toStringAsFixed(0)}%', // Show percentage
             activeColor: Colors.orangeAccent,
             inactiveColor: Colors.white30,
             onChanged: onChanged,

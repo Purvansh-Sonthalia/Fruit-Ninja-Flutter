@@ -41,6 +41,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   List<Offset> slicePoints = []; // List to hold points of the current slice
   Random random = Random();
   Size? screenSize; // Add state variable for screen size
+  bool needRepaint = false;
+  Offset? _lastSlicePoint;
 
   late AnimationController _controller;
   Timer? _spawnTimer;
@@ -77,7 +79,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 
   void _startSpawning() {
     // Ensure screenSize is available before starting timer
-    if (screenSize == null || screenSize!.isEmpty) return;
+    if (screenSize == null) return;
 
     _spawnTimer?.cancel(); // Cancel any existing timer
     _spawnTimer = Timer.periodic(Duration(seconds: fruitSpawnIntervalSeconds.toInt()), (timer) {
@@ -87,10 +89,10 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 
   void _spawnFruit() {
     // Use the stored screen size
-    if (!mounted || screenSize == null || screenSize!.isEmpty) return;
+    if (screenSize == null) return;
 
     double startX = random.nextDouble() * screenSize!.width;
-    double startY = screenSize!.height + 50; // Start below screen
+    double startY = screenSize!.height + 50;
 
     double speed = fruitInitialSpeedMin + random.nextDouble() * (fruitInitialSpeedMax - fruitInitialSpeedMin);
     double angle = -pi / 4 - random.nextDouble() * pi / 2; // Angle upwards (-45 to -135 degrees)
@@ -118,48 +120,72 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   }
 
   void _updateGame() {
-    // Use the stored screen size
-    if (!mounted || screenSize == null || screenSize!.isEmpty) return;
-
     final double dt = _controller.duration!.inMilliseconds / 1000.0; // Time delta in seconds
-
-    // Update fruits and remove off-screen ones
-    List<Fruit> fruitsToRemove = [];
-    for (var fruit in fruits) {
-      fruit.update(dt, screenSize!); // Pass stored screenSize
-      // Remove fruit if it falls below the screen (and wasn't sliced)
-      if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && !fruit.isSliced) {
-         fruitsToRemove.add(fruit);
-         if (lives > 0) {
-            lives--;
-         }
-      }
-      // Optionally remove sliced fruits after some time or animation
-       else if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && fruit.isSliced) {
-           fruitsToRemove.add(fruit);
-       }
+    _updateFruits(dt);
+    if (needRepaint) {
+        setState(() {
+            needRepaint = false;
+        });
     }
+  }
 
-    // Remove fruits marked for removal
-    fruits.removeWhere((fruit) => fruitsToRemove.contains(fruit));
+  void _updateFruits(double dt) {
+    Future.microtask(() {
+        if (screenSize == null) return;
+        bool changes = false;
+        List<Fruit> fruitsThatMoved = [];
+        // Update fruits and remove off-screen ones
+        List<Fruit> fruitsToRemove = [];
+        for (var fruit in fruits) {
+          final oldPosition = fruit.position;
+          fruit.update(dt, screenSize!);
+            if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && !fruit.isSliced) {
+                fruitsToRemove.add(fruit);
+                if (lives > 0) {
+                    lives--;
+                    changes = true;
+                }
+            }
+          else if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && fruit.isSliced) {
+            fruitsToRemove.add(fruit);
+          }
+          // Add fruit to fruitsThatMoved if its position has changed
+          if (oldPosition != fruit.position) {
+            fruitsThatMoved.add(fruit);
+          }
 
-    // Clear slice points if the pan ended recently (optional visual persistence)
-    // Add more sophisticated clearing if needed
+        }
+         bool sliceTrailChanged = false;
+        
+        if (fruitsToRemove.isNotEmpty) {
+            fruits.removeWhere((fruit) => fruitsToRemove.contains(fruit));
+            changes = true;
+        }
+        // Clear slice points if the pan ended recently (optional visual persistence)
+        // Add more sophisticated clearing if needed
 
-    // Check for game over
-    if (lives <= 0) {
-      _gameOver();
-    }
-
-    setState(() {}); // Trigger repaint
+        // Check for game over
+        if (lives <= 0) {
+            _gameOver();
+            changes = true;
+        }
+        
+      needRepaint = fruitsThatMoved.isNotEmpty || sliceTrailChanged || changes;
+        if(needRepaint){
+          setState(() {
+          });
+        }
+    });
   }
 
   void _handleSlice(DragUpdateDetails details) {
-    if (!mounted) return;
     final currentPoint = details.localPosition;
-    setState(() {
+    if (_lastSlicePoint == null || (currentPoint - _lastSlicePoint!).distance > 15) {
+      setState(() {
         slicePoints.add(currentPoint);
-    });
+        _lastSlicePoint = currentPoint;
+      }); 
+    }
 
     // Check for intersection with fruits
     if (slicePoints.length < 2) return; // Need at least two points for a line segment
@@ -172,24 +198,26 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
         // Simple distance check from segment to fruit center
         // A more accurate check would involve line-circle intersection
         if (segment.distanceToPoint(fruit.position) < fruit.radius) {
-            fruit.isSliced = true;
-            score++;
-            // TODO: Add slice effect (e.g., split fruit, sound)
+          fruit.isSliced = true;
+          score++;
+          // TODO: Add slice effect (e.g., split fruit, sound)
+          setState(() {});
         }
       }
+    }
+      if (fruits.any((element) => element.isSliced)) {
+        setState(() {});
     }
   }
 
   void _endSlice(DragEndDetails details) {
-      if (!mounted) return;
       // Clear slice points after a short delay for visual effect, or immediately
       Future.delayed(const Duration(milliseconds: 200), () {
-         if (mounted) { // Check again if mounted after delay
-            setState(() {
-               slicePoints.clear();
-            });
-         }
+        setState(() {
+          slicePoints.clear();
+        }); 
       });
+
   }
 
   void _gameOver() {
@@ -204,14 +232,12 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Fruit Ninja - Score: $score | Lives: $lives'),
-      ),
+      appBar: AppBar(title: Text('Fruit Ninja - Score: $score | Lives: $lives')),
       body: GestureDetector(
         onPanStart: (details) {
-            if (!mounted) return;
             setState(() {
                 slicePoints = [details.localPosition]; // Start new slice
+
             });
         },
         onPanUpdate: _handleSlice, // Use dedicated handler
@@ -221,7 +247,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
           width: double.infinity,
           height: double.infinity,
           child: CustomPaint(
-            painter: GamePainter(fruits: fruits, slicePoints: slicePoints), // Pass fruits and slice points
+            painter: GamePainter(fruits: fruits, slicePoints: slicePoints, fruitsThatMoved: const []), // Pass fruits and slice points
             child: Container(),
           ),
         ),
@@ -252,23 +278,36 @@ class LineSegment {
 class GamePainter extends CustomPainter {
   final List<Fruit> fruits;
   final List<Offset> slicePoints;
+  final List<Fruit> fruitsThatMoved;
 
-  GamePainter({required this.fruits, required this.slicePoints});
+  GamePainter({required this.fruits, required this.slicePoints, required this.fruitsThatMoved});
 
   @override
   void paint(Canvas canvas, Size size) {
     final fruitPaint = Paint();
     final slicePaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 4.0
-      ..strokeCap = StrokeCap.round;
+      ..color = Colors.white.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 8;
 
-    // Draw Fruits
-    for (var fruit in fruits) {
-      if (!fruit.isSliced) {
-        fruitPaint.color = fruit.color;
-        canvas.drawCircle(fruit.position, fruit.radius, fruitPaint);
-      } else {
+    final slicePaint2 = Paint()
+      ..color = Colors.white.withOpacity(0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 6;
+
+    // Draw Fruits, only the ones that moved or all if none moved
+    List<Fruit> fruitsToDraw = fruitsThatMoved.isEmpty ? fruits : fruitsThatMoved;
+
+    for (var fruit in fruitsToDraw) {
+      if(fruits.contains(fruit)) {
+        if (!fruit.isSliced) {
+          fruitPaint.color = fruit.color;
+          canvas.drawCircle(fruit.position, fruit.radius, fruitPaint);
+        } else {
         // TODO: Draw sliced fruit representation (e.g., two halves)
         // For now, just draw a smaller circle or change color
         fruitPaint.color = fruit.color.withOpacity(0.5);
@@ -276,20 +315,35 @@ class GamePainter extends CustomPainter {
       }
     }
 
+
     // Draw Slice Trail
-    if (slicePoints.length > 1) {
-      Path slicePath = Path();
-      slicePath.moveTo(slicePoints[0].dx, slicePoints[0].dy);
-      for (int i = 1; i < slicePoints.length; i++) {
-        slicePath.lineTo(slicePoints[i].dx, slicePoints[i].dy);
+    if (slicePoints.isNotEmpty) {
+      final slicePath = Path();
+      
+      slicePath.moveTo(slicePoints.first.dx, slicePoints.first.dy);
+      for (final point in slicePoints.skip(1)) {
+        slicePath.lineTo(point.dx, point.dy);
       }
+
+      canvas.drawPath(slicePath, slicePaint2);
       canvas.drawPath(slicePath, slicePaint);
     }
+
+
   }
 
   @override
   bool shouldRepaint(covariant GamePainter oldDelegate) {
-    // Repaint if fruits or slice points change
-    return oldDelegate.fruits != fruits || oldDelegate.slicePoints != slicePoints;
+    if (oldDelegate.slicePoints != slicePoints) return true;
+
+    if (oldDelegate.fruits.length != fruits.length) return true;
+
+    for (int i = 0; i < fruits.length; i++) {
+        if (oldDelegate.fruits[i].position != fruits[i].position) return true;
+        if (oldDelegate.fruits[i].isSliced != fruits[i].isSliced) return true;
+    }
+    if (oldDelegate.fruitsThatMoved.isNotEmpty) return true;
+
+    return false;
   }
 } 

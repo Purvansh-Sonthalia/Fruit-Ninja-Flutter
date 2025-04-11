@@ -21,7 +21,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final _supabase = Supabase.instance.client;
   bool _isLoading = false; // To show loading indicator on the button
   // Change to a list to hold multiple images
-  List<XFile> _selectedImages = [];
+  final List<XFile> _selectedImages = [];
   final ImagePicker _picker = ImagePicker(); // Image picker instance
 
   @override

@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/auth_service.dart';
 import 'dart:developer'; // For logging
 import 'dart:convert'; // Required for base64Decode, jsonDecode
 import 'dart:typed_data'; // Required for Uint8List
