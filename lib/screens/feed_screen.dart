@@ -6,6 +6,8 @@ import 'dart:typed_data'; // Required for Uint8List
 import 'dart:ui' as ui; // Import for ui.Image
 import 'dart:async'; // Import for Completer
 import 'create_post_screen.dart'; // Import the new screen
+import 'package:provider/provider.dart';
+import '../services/auth_service.dart';
 
 // Define a model for the Post data for better type safety
 class Post {
@@ -542,13 +544,21 @@ class _FeedScreenState extends State<FeedScreen> {
                   final bool hasImages =
                       post.imageList != null && post.imageList!.isNotEmpty;
 
+                  // Get the current user ID
+                  final authService = Provider.of<AuthService>(context, listen: false);
+                  final currentUserId = authService.userId;
+                  final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
+
                   return Card(
                     margin: const EdgeInsets.symmetric(
                       vertical: 6,
                       horizontal: 4,
                     ),
                     elevation: 0,
-                    color: Colors.white.withOpacity(0.25),
+                    // Conditional card color
+                    color: isSelfPost
+                        ? Colors.yellow.withOpacity(0.3) // Yellow tint for self posts
+                        : Colors.green.shade900.withOpacity(0.4), // Dark green tint for others
                     clipBehavior: Clip.antiAlias,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(15),
@@ -556,6 +566,21 @@ class _FeedScreenState extends State<FeedScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // --- Add Author Label ---
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
+                          child: Text(
+                            isSelfPost ? 'YOU' : 'ANONYMOUS',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.9),
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        // Add a small spacer only if label is present
+                        const SizedBox(height: 4),
                         // --- Use the new PostImageViewer widget ---
                         if (hasImages)
                           PostImageViewer(
@@ -573,7 +598,7 @@ class _FeedScreenState extends State<FeedScreen> {
                             children: [
                               // Only add top padding if there are images above
                               // Adjust spacing based on whether images are present
-                              SizedBox(height: hasImages ? 8 : 0),
+                              // SizedBox(height: hasImages ? 8 : 0), // Removed this fixed padding, label handles top space now
                               Text(
                                 post.textContent,
                                 style: const TextStyle(
