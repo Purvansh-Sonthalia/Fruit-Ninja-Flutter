@@ -8,6 +8,7 @@ import 'weather_screen.dart';
 import '../services/weather_provider.dart';
 import 'settings_screen.dart';
 import '../utils/assets_manager.dart';
+import 'feed_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -38,7 +39,8 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        child: SafeArea( // Ensure content respects safe areas (notches, etc.)
+        child: SafeArea(
+          // Ensure content respects safe areas (notches, etc.)
           child: Stack(
             children: [
               Center(
@@ -85,7 +87,9 @@ class HomeScreen extends StatelessWidget {
                       builder:
                           (ctx, authService, _) => _buildMenuButton(
                             context,
-                            authService.isLoggedIn ? 'LOGOUT' : 'LOGIN / SIGN UP',
+                            authService.isLoggedIn
+                                ? 'LOGOUT'
+                                : 'LOGIN / SIGN UP',
                             Colors.green,
                             () {
                               if (authService.isLoggedIn) {
@@ -164,6 +168,30 @@ class HomeScreen extends StatelessWidget {
                     );
                   },
                   tooltip: 'Weather',
+                ),
+              ),
+              // Feed Icon Button (Next to Weather)
+              Positioned(
+                top: edgePadding, // Align with other top icons
+                right:
+                    edgePadding +
+                    iconSize +
+                    (edgePadding / 2), // Position left of weather icon
+                child: IconButton(
+                  icon: Icon(
+                    Icons.feed, // Using the feed icon
+                    color: Colors.white, // Matching other icons
+                    size: iconSize, // Use responsive size
+                  ),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const FeedScreen(),
+                      ),
+                    );
+                  },
+                  tooltip: 'Feeds', // Add a tooltip
                 ),
               ),
               // --- End Icons ---
