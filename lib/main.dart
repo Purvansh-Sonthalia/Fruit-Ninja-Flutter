@@ -9,6 +9,7 @@ import 'package:fruit_ninja_flutter/utils/assets_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/firebase_messaging_service.dart';
+import 'providers/feed_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +60,7 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (_) => WeatherProvider()),
         ChangeNotifierProvider.value(value: AssetsManager()),
+        ChangeNotifierProvider(create: (_) => FeedProvider()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

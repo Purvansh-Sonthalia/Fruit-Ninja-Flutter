@@ -9,107 +9,9 @@ import 'create_post_screen.dart'; // Import the new screen
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import 'package:intl/intl.dart';
-
-// Define a model for the Post data for better type safety
-class Post {
-  final String id;
-  final String userId;
-  final String textContent;
-  final DateTime createdAt;
-  // Store the list of image data maps
-  final List<Map<String, dynamic>>? imageList;
-
-  Post({
-    required this.id,
-    required this.userId,
-    required this.textContent,
-    required this.createdAt,
-    this.imageList,
-  });
-
-  factory Post.fromJson(Map<String, dynamic> json) {
-    // Ensure required fields are present and have correct types
-    if (json['post_id'] == null ||
-        json['user_id'] == null ||
-        json['created_at'] == null) {
-      log('Error: Missing required field in post JSON: $json');
-      throw FormatException('Invalid post data received: $json');
-    }
-
-    List<Map<String, dynamic>>? parsedImageList;
-    final dynamic mediaContent =
-        json['media_content']; // Use dynamic type for check
-
-    if (mediaContent != null) {
-      if (mediaContent is String && mediaContent.isNotEmpty) {
-        // New format: JSON string representing a list
-        try {
-          final decodedList = jsonDecode(mediaContent) as List<dynamic>;
-          parsedImageList =
-              decodedList.map((item) {
-                if (item is Map<String, dynamic>) {
-                  return item;
-                } else {
-                  log(
-                    'Warning: Invalid item type in media_content list for post ${json['post_id']}: $item',
-                  );
-                  return <String, dynamic>{}; // Handle error: empty map
-                }
-              }).toList();
-        } catch (e) {
-          log(
-            'Error decoding media_content JSON string for post ${json['post_id']}: $e',
-          );
-          parsedImageList = null; // Handle JSON decoding error
-        }
-      } else if (mediaContent is Map<String, dynamic>) {
-        // Old format: Single JSON object
-        // Check if the map is not empty and contains expected keys (optional but good practice)
-        if (mediaContent.containsKey('image_base64') ||
-            mediaContent.containsKey('image_mime_type')) {
-          parsedImageList = [mediaContent]; // Wrap the single map in a list
-        } else {
-          log(
-            'Warning: media_content map is empty or missing expected keys for post ${json['post_id']}',
-          );
-          parsedImageList = null;
-        }
-      } else {
-        // Unexpected type for media_content
-        log(
-          'Warning: Unexpected type for media_content for post ${json['post_id']}: ${mediaContent.runtimeType}',
-        );
-        parsedImageList = null;
-      }
-    }
-
-    return Post(
-      id: json['post_id'] as String,
-      userId: json['user_id'] as String,
-      textContent:
-          json['text_content'] as String? ?? '', // Handle null text better
-      createdAt: DateTime.parse(json['created_at'] as String),
-      imageList: parsedImageList, // Assign the parsed list
-    );
-  }
-
-  // Helper to decode Base64 image data from the list by index
-  Uint8List? getDecodedImageBytes(int index) {
-    if (imageList != null && index >= 0 && index < imageList!.length) {
-      final imageData = imageList![index];
-      final base64String = imageData['image_base64'] as String?;
-      if (base64String != null && base64String.isNotEmpty) {
-        try {
-          return base64Decode(base64String);
-        } catch (e) {
-          log('Error decoding base64 image at index $index for post $id: $e');
-          return null;
-        }
-      }
-    }
-    return null;
-  }
-}
+import 'package:flutter/rendering.dart';
+import '../providers/feed_provider.dart'; // Import FeedProvider
+import '../models/post_model.dart'; // Correct import for Post
 
 // --- New StatefulWidget for Image Viewer ---
 class PostImageViewer extends StatefulWidget {
@@ -387,23 +289,29 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  // State for infinite scrolling
-  final List<Post> _loadedPosts = [];
-  final _supabase = Supabase.instance.client;
+  // --- Remove State Variables ---
+  // final List<Post> _loadedPosts = [];
+  // final _supabase = Supabase.instance.client; 
+  // bool _isLoading = false;
+  // bool _isLoadingMore = false;
+  // bool _hasMorePosts = true;
+  // int _currentOffset = 0;
+  // static const int _fetchLimit = 10;
+  
+  // --- Keep ScrollController ---
   final ScrollController _scrollController = ScrollController();
-  bool _isLoading = false; // Tracks initial load
-  bool _isLoadingMore = false; // Tracks loading more posts
-  bool _hasMorePosts = true; // Assume there are more posts initially
-  int _currentOffset = 0;
-  static const int _fetchLimit = 10; // Number of posts to fetch each time
 
   @override
   void initState() {
     super.initState();
-    // Add listener to scroll controller
     _scrollController.addListener(_onScroll);
-    // Fetch initial posts
-    _fetchInitialPosts();
+    // Fetch initial posts when the screen loads for the first time
+    // Use addPostFrameCallback to ensure context is available
+    WidgetsBinding.instance.addPostFrameCallback((_) { 
+      // Access provider without listening here, just triggering the fetch
+      final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+      feedProvider.fetchInitialPosts();
+    });
   }
 
   @override
@@ -413,148 +321,48 @@ class _FeedScreenState extends State<FeedScreen> {
     super.dispose();
   }
 
-  // Listener for scroll events
+  // Listener for scroll events - Calls provider method
   void _onScroll() {
-    // Check if nearing the end and not already loading more
+    final feedProvider = Provider.of<FeedProvider>(context, listen: false);
     if (_scrollController.position.pixels >=
             _scrollController.position.maxScrollExtent * 0.9 &&
-        !_isLoadingMore &&
-        _hasMorePosts &&
-        !_isLoading // Don't trigger if initial load is still happening
-        ) {
-      log('Loading more posts...'); // Log message when loading more posts
-      _loadMorePosts();
+        !feedProvider.isLoadingMore &&
+        feedProvider.hasMorePosts &&
+        !feedProvider.isLoading) {
+      log('Requesting loadMorePosts from provider...');
+      feedProvider.loadMorePosts();
     }
   }
 
-  // Fetch the very first batch of posts
-  Future<void> _fetchInitialPosts() async {
-    if (_isLoading) return; // Already loading initially
+  // --- Remove Data Fetching Logic (_fetchInitialPosts, _loadMorePosts, _fetchPosts) ---
+  // These are now handled by FeedProvider
 
-    setState(() {
-      _isLoading = true;
-      _loadedPosts.clear(); // Clear previous posts on initial fetch/refresh
-      _currentOffset = 0; // Reset offset
-      _hasMorePosts = true; // Reset flag
-    });
-
-    try {
-      final newPosts = await _fetchPosts(limit: _fetchLimit, offset: 0);
-      if (!mounted) return; // Check if widget is still mounted
-
-      setState(() {
-        _loadedPosts.addAll(newPosts);
-        _currentOffset = newPosts.length;
-        _hasMorePosts = newPosts.length == _fetchLimit; // Check if we got a full batch
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false); // Stop loading indicator on error
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error fetching initial posts: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      log('Error during initial fetch: $e');
-    }
-  }
-
-  // Load subsequent batches of posts
-  Future<void> _loadMorePosts() async {
-    if (_isLoadingMore || !_hasMorePosts || _isLoading) return; // Exit if already loading, no more posts, or initial load in progress
-
-    setState(() {
-      _isLoadingMore = true;
-    });
-
-    try {
-      final newPosts = await _fetchPosts(limit: _fetchLimit, offset: _currentOffset);
-      if (!mounted) return; // Check if widget is still mounted
-
-      setState(() {
-        _loadedPosts.addAll(newPosts);
-        _currentOffset += newPosts.length;
-        _hasMorePosts = newPosts.length == _fetchLimit; // Update based on this fetch
-        _isLoadingMore = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingMore = false); // Stop loading indicator on error
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading more posts: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      log('Error loading more posts: $e');
-    }
-  }
-
-  // Modified fetch function to accept limit and offset
-  Future<List<Post>> _fetchPosts({required int limit, required int offset}) async {
-    try {
-      final response = await _supabase
-          .from('posts')
-          .select(
-            'post_id, user_id, text_content, created_at, media_content',
-          )
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1); // Use range for pagination
-
-      // Supabase client returns List<Map<String, dynamic>> directly
-      final List<Map<String, dynamic>> data = response;
-
-      log('Fetched posts: offset=$offset, limit=$limit, count=${data.length}');
-
-      final List<Post> posts = [];
-      for (var item in data) {
-        try {
-          posts.add(Post.fromJson(item));
-        } catch (e) {
-          log('Error parsing post item: $item, error: $e');
-          // Skip invalid items
-        }
-      }
-
-      log('Parsed posts: ${posts.length}');
-      return posts;
-    } catch (e, stacktrace) {
-      log('Error fetching posts (offset=$offset, limit=$limit): $e\n$stacktrace');
-      // Re-throw the error to be caught by the calling function
-      // This allows the UI to show specific error messages for initial/load more
-      rethrow;
-    }
-  }
-
-  // Helper function to refresh the feed
+  // Helper function to refresh the feed - Calls provider method
   Future<void> _handleRefresh() async {
-    // Trigger the initial fetch process again
-    await _fetchInitialPosts();
+    await Provider.of<FeedProvider>(context, listen: false)
+        .fetchInitialPosts(forceRefresh: true);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Use Consumer or context.watch to get data from FeedProvider
+    final feedProvider = context.watch<FeedProvider>();
+    final loadedPosts = feedProvider.posts;
+    final isLoading = feedProvider.isLoading;
+    final isLoadingMore = feedProvider.isLoadingMore;
+    final hasMorePosts = feedProvider.hasMorePosts;
+
     return Scaffold(
-      // Allow body to extend behind the AppBar
       extendBodyBehindAppBar: true,
-      // Restore AppBar but make it transparent
       appBar: AppBar(
         title: const Text(
           'Community Feed',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        // Make AppBar transparent
         backgroundColor: Colors.transparent,
-        // Remove shadow
         elevation: 0,
-        // Keep default back button (leading)
       ),
       body: Container(
-        // Ensure the gradient covers the whole screen
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -562,10 +370,9 @@ class _FeedScreenState extends State<FeedScreen> {
             colors: [Color(0xFF87CEEB), Color(0xFF4682B4)],
           ),
         ),
-        // Use RefreshIndicator for pull-to-refresh
         child: RefreshIndicator(
-          onRefresh: _handleRefresh, // Use the refresh handler
-          child: _buildFeedContent(), // Delegate content building
+          onRefresh: _handleRefresh,
+          child: _buildFeedContent(loadedPosts, isLoading, isLoadingMore, hasMorePosts), // Pass data
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
@@ -575,30 +382,31 @@ class _FeedScreenState extends State<FeedScreen> {
             context,
             MaterialPageRoute(builder: (context) => const CreatePostScreen()),
           );
-          // Refresh the feed if a post was created
           if (result == true && mounted) {
-            await _handleRefresh(); // Await the refresh
+             // Await the refresh triggered via provider
+            await _handleRefresh();
           }
         },
-        child: const Icon(Icons.add_comment_outlined), // Keep only the icon
+        child: const Icon(Icons.add_comment_outlined),
         backgroundColor: Colors.orangeAccent,
         foregroundColor: Colors.white,
-        shape: const CircleBorder(), // Make it circular
+        shape: const CircleBorder(),
       ),
     );
   }
 
-  // Helper widget to build the main feed content based on state
-  Widget _buildFeedContent() {
+  // Helper widget to build the main feed content based on state from provider
+  Widget _buildFeedContent(
+      List<Post> loadedPosts, bool isLoading, bool isLoadingMore, bool hasMorePosts) { 
     // Show loading indicator during initial fetch
-    if (_isLoading) {
+    if (isLoading && loadedPosts.isEmpty) { // Check if loading AND list is empty
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
 
     // Show message if no posts after initial load
-    if (_loadedPosts.isEmpty) {
+    if (loadedPosts.isEmpty && !isLoading) { // Check list empty AND not loading
       return ListView( // Wrap in ListView to enable pull-to-refresh even when empty
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
@@ -618,30 +426,26 @@ class _FeedScreenState extends State<FeedScreen> {
       );
     }
 
-    // Build the list view with posts and potentially a loading indicator
+    // Build the list view
     return ListView.builder(
-      controller: _scrollController, // Attach the scroll controller
-      padding: const EdgeInsets.only(top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8), // Adjust top padding for transparent AppBar
-      // Add 1 to item count if we might load more or show end message
-      itemCount: _loadedPosts.length + (_hasMorePosts || !_isLoadingMore ? 1 : 0),
+      controller: _scrollController,
+      padding: const EdgeInsets.only(top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8),
+      itemCount: loadedPosts.length + (hasMorePosts || isLoadingMore ? 1 : 0), // Adjust count based on provider state
       itemBuilder: (context, index) {
-        // Check if it's the last item index
-        final isLastItem = index == _loadedPosts.length;
+        final isLastItem = index == loadedPosts.length;
 
         if (isLastItem) {
-          // If it's the last item, show loading or end message
-          if (_hasMorePosts) {
-            // Show loading indicator if loading more
-            return _isLoadingMore
+          if (hasMorePosts) {
+            return isLoadingMore
                 ? const Center(
                     child: Padding(
                     padding: EdgeInsets.symmetric(vertical: 16.0),
                     child: CircularProgressIndicator(color: Colors.white70),
                   ))
-                : const SizedBox.shrink(); // Or nothing if not currently loading
+                : const SizedBox.shrink();
           } else {
-            // Show "End of Feed" message if no more posts
-            return const Padding(
+            // Only show end of feed if not loading initially
+            return !isLoading ? const Padding( 
               padding: EdgeInsets.symmetric(vertical: 20.0),
               child: Center(
                 child: Text(
@@ -653,32 +457,26 @@ class _FeedScreenState extends State<FeedScreen> {
                   ),
                 ),
               ),
-            );
+            ) : const SizedBox.shrink();
           }
         }
 
-        // Otherwise, build the post card for the current index
-        final post = _loadedPosts[index];
-        final bool hasImages =
-            post.imageList != null && post.imageList!.isNotEmpty;
-
-        // Get the current user ID
+        final post = loadedPosts[index];
+        final bool hasImages = post.imageList != null && post.imageList!.isNotEmpty;
         final authService = Provider.of<AuthService>(context, listen: false);
         final currentUserId = authService.userId;
         final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
-
         final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
 
         return Card(
-          margin: const EdgeInsets.symmetric(
-            vertical: 6,
-            horizontal: 4,
-          ),
+          key: ValueKey(post.id),
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
           elevation: 0,
-          // Conditional card color
-          color: isSelfPost
-              ? Colors.yellow.withOpacity(0.3) // Yellow tint for self posts
-              : Colors.green.shade900.withOpacity(0.4), // Dark green tint for others
+          color: post.reported
+              ? Colors.deepOrange.withOpacity(0.4)
+              : isSelfPost
+                  ? Colors.yellow.withOpacity(0.3)
+                  : Colors.green.shade900.withOpacity(0.4),
           clipBehavior: Clip.antiAlias,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
@@ -686,33 +484,37 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // --- Add Author Label ---
               Padding(
                 padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
-                child: Text(
-                  isSelfPost ? 'YOU' : 'ANONYMOUS',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: Colors.white.withOpacity(0.9),
-                    letterSpacing: 0.5,
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      isSelfPost ? 'YOU' : 'ANONYMOUS',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.9),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.more_vert, color: Colors.white),
+                      onPressed: () {
+                        _showPostOptions(context, post, isSelfPost);
+                      },
+                    ),
+                  ],
                 ),
               ),
-              // Add a small spacer only if label is present
               const SizedBox(height: 4),
-              // --- Use the new PostImageViewer widget ---
               if (hasImages)
                 PostImageViewer(
                   imageList: post.imageList!,
                   postId: post.id,
                 ),
-
-              // --- Post Content (Text & Timestamp) ---
               Padding(
-                padding: const EdgeInsets.all(
-                  16.0,
-                ), // Add padding around text
+                padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -741,4 +543,122 @@ class _FeedScreenState extends State<FeedScreen> {
       },
     );
   }
-}
+
+  // --- Update action handlers to use provider and show SnackBars ---
+
+  void _showPostOptions(BuildContext context, Post post, bool isSelfPost) {
+    final feedProvider = Provider.of<FeedProvider>(context, listen: false); // Get provider instance
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext bc) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).canvasColor,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20.0),
+              topRight: Radius.circular(20.0),
+            ),
+          ),
+          child: Wrap(
+            children: <Widget>[
+              if (isSelfPost)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text('Delete Post', style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(context); // Close bottom sheet
+                    _confirmAndDeletePost(context, feedProvider, post.id); // Call new helper
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report Post'),
+                onTap: () async { // Make async
+                  Navigator.pop(context); // Close bottom sheet
+                  _handleReportPost(context, feedProvider, post.id); // Call new helper
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cancel_outlined),
+                title: const Text('Cancel'),
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Helper for delete confirmation and action
+  void _confirmAndDeletePost(BuildContext buildContext, FeedProvider feedProvider, String postId) {
+     showDialog(
+        context: buildContext, // Use the context passed to the options sheet
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
+              icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 40),
+              title: const Text('Delete Post', textAlign: TextAlign.center),
+              content: const Text(
+                  'Are you sure you want to delete this post? This action cannot be undone.',
+                  textAlign: TextAlign.center,
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  onPressed: () async { // Make async
+                    Navigator.of(dialogContext).pop(); // Close the dialog
+                    // Call provider delete method
+                    final success = await feedProvider.deletePost(postId);
+                    // Show SnackBar based on result - check if context is still valid
+                    if (mounted) {
+                        ScaffoldMessenger.of(buildContext).showSnackBar(
+                          SnackBar(
+                            content: Text(success ? 'Post deleted successfully.' : 'Error deleting post.'),
+                            backgroundColor: success ? Colors.green : Colors.red,
+                          ),
+                        );
+                    }
+                  },
+                  child: const Text('Delete'),
+                ),
+              ],
+          );
+        },
+     );
+  }
+
+  // Helper for reporting post and showing Snackbar
+  Future<void> _handleReportPost(BuildContext buildContext, FeedProvider feedProvider, String postId) async {
+    if (mounted) {
+      ScaffoldMessenger.of(buildContext).showSnackBar(
+        const SnackBar(
+          content: Text('Submitting report...'),
+          backgroundColor: Colors.blueAccent,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+    final success = await feedProvider.reportPost(postId);
+    // Show SnackBar based on result - check if context is still valid
+     if (mounted) {
+        ScaffoldMessenger.of(buildContext).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'Post reported successfully. Thank you.' : 'Error submitting report.'),
+            backgroundColor: success ? Colors.green : Colors.red,
+          ),
+        );
+     }
+  }
+
+  // --- Remove _reportPost and _deletePost methods ---
+  // Logic is now in FeedProvider, UI handles SnackBars via helpers
+
+} // End of _FeedScreenState
