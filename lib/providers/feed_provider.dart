@@ -5,6 +5,9 @@ import 'dart:developer';
 // Add import for Uint8List
 // Adjust the import path based on your project structure if needed
 import '../models/post_model.dart'; // Assuming Post model might be moved later
+import 'dart:convert'; // For jsonEncode
+import 'package:http/http.dart' as http; // For HTTP requests
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
 
 // Or if Post is still in feed_screen.dart:
 // import '../screens/feed_screen.dart';
@@ -343,6 +346,9 @@ class FeedProvider with ChangeNotifier {
           // await _supabase.rpc('increment_like_count', params: {'pid': postId});
 
           log('Successfully liked post $postId for user $userId');
+          // --- Send Notification ---
+          await _sendLikeNotification(post.userId, userId, postId);
+          // -------------------------
           return true; // Indicate success
         } catch (e) {
           log('Error liking post $postId in Supabase: $e');
@@ -429,5 +435,59 @@ class FeedProvider with ChangeNotifier {
     }
   }
 
+  // --- Placeholder for Sending Like Notification ---
+  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId, String postId) async {
+    // Prevent self-notification
+    if (postAuthorId == likerUserId) {
+       log('[Notification] User $likerUserId liked their own post $postId. No notification sent.');
+       return;
+    }
+
+    log('[Notification] Attempting to send like notification via backend: User $likerUserId liked post $postId by user $postAuthorId');
+
+    // Access the backend URL from environment variables
+    final String? backendBaseUrl = dotenv.env['BACKEND_URL'];
+    if (backendBaseUrl == null) {
+      log('[Notification] Error: BACKEND_URL not found in .env file.');
+      return; // Stop if backend URL is not configured
+    }
+
+    // --- Define Backend Endpoint ---
+    // IMPORTANT: Replace with your actual backend endpoint for like notifications
+    final String likeNotificationUrl = '$backendBaseUrl/api/send-like-notification';
+    // -------------------------------
+
+    try {
+       // Prepare the notification payload
+       // TODO: Consider fetching the liker's display name/username if needed for the notification body
+       final String title = 'Someone liked your post!';
+       final String body = 'A user liked your post.'; // Example body
+
+      final response = await http.post(
+        Uri.parse(likeNotificationUrl),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(<String, dynamic>{
+          'recipientUserId': postAuthorId, // The user ID of the person whose post was liked
+          'likerUserId': likerUserId,    // The user ID of the person who liked the post
+          'postId': postId,              // The ID of the liked post
+          'notificationTitle': title,    // Optional: Title for the notification
+          'notificationBody': body,      // Optional: Body/message for the notification
+          // Add any other relevant data your backend needs
+        }),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        log('[Notification] Like notification sent successfully via backend.');
+      } else {
+        log(
+          '[Notification] Failed to send like notification via backend. Status: ${response.statusCode}, Body: ${response.body}',
+        );
+        // Optional: Add more robust error handling or user feedback if needed
+      }
+    } catch (e, stacktrace) {
+      log('[Notification] Error calling like notification backend endpoint: $e\n$stacktrace');
+      // Optional: Add more robust error handling
+    }
+  }
   // --- End Like/Unlike Methods ---
 }

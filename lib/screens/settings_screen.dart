@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'package:provider/provider.dart'; // Import Provider
+import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
 import '../utils/assets_manager.dart'; // Import AssetsManager
 // import '../services/notification_service.dart'; // Remove local notification service import
 import '../services/firebase_messaging_service.dart'; // Import FCM Service
@@ -47,26 +48,87 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // No need to sync subscription here, FirebaseMessagingService handles initial sync
   }
 
-  // Handle notification toggle change - Now subscribes/unsubscribes
+  // Handle notification toggle change - Now subscribes/unsubscribes and updates Supabase
   Future<void> _handleNotificationSettingChange(bool enabled) async {
-    // Save the setting
+    // Save the setting locally
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_notificationsKey, enabled);
 
-    // Update UI state
+    // Update UI state first
     setState(() {
       _notificationsEnabled = enabled;
     });
 
-    // Apply the change using FirebaseMessagingService
+    // Get Supabase instance and current user
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+
+    // Only proceed if user is logged in
+    if (user == null) {
+      print("User not logged in, skipping FCM token update.");
+      // Still manage topic subscription locally if needed, even if not logged in
+      // (Depending on desired app behavior)
+      if (enabled) {
+        print("Subscribing to reminder topic (local)...");
+        await FirebaseMessagingService().subscribeToReminders();
+      } else {
+        print("Unsubscribing from reminder topic (local)...");
+        await FirebaseMessagingService().unsubscribeFromReminders();
+      }
+      return; // Exit if no user
+    }
+
+    // User is logged in, proceed with FCM logic and Supabase update
+    final fcmService = FirebaseMessagingService();
+
     if (enabled) {
-      print("Subscribing to reminder topic...");
-      // Request permissions first (optional here, as initialize does it, but good practice)
-      // await FirebaseMessagingService().requestPermissions();
-      await FirebaseMessagingService().subscribeToReminders();
+      print("Subscribing to reminder topic and updating Supabase...");
+      try {
+        // Request permissions and subscribe to topic
+        // await fcmService.requestPermissions(); // Might already be handled in init
+        await fcmService.subscribeToReminders();
+
+        // Get FCM token
+        final fcmToken = await fcmService.getFcmToken();
+        print("FCM Token: $fcmToken");
+
+        if (fcmToken != null) {
+          // Upsert the token in Supabase
+          await supabase.from('FCM-tokens').upsert({
+            'user_id': user.id,
+            'fcm_token': fcmToken,
+          });
+          print("FCM token updated in Supabase for user ${user.id}");
+        } else {
+          print("Failed to get FCM token.");
+          // Optionally revert the toggle state or show an error
+          // setState(() => _notificationsEnabled = false);
+          // await prefs.setBool(_notificationsKey, false);
+        }
+      } catch (e) {
+        print("Error subscribing/updating Supabase: $e");
+        // Optionally revert the toggle state or show an error
+        // setState(() => _notificationsEnabled = false);
+        // await prefs.setBool(_notificationsKey, false);
+      }
     } else {
-      print("Unsubscribing from reminder topic...");
-      await FirebaseMessagingService().unsubscribeFromReminders();
+      print("Unsubscribing from reminder topic and removing token from Supabase...");
+      try {
+        // Unsubscribe from topic
+        await fcmService.unsubscribeFromReminders();
+
+        // Remove the token record from Supabase for this user
+        await supabase
+            .from('FCM-tokens')
+            .delete()
+            .match({'user_id': user.id});
+        print("FCM token record removed from Supabase for user ${user.id}");
+      } catch (e) {
+        print("Error unsubscribing/removing token from Supabase: $e");
+        // Optionally revert the toggle state or show an error
+        // setState(() => _notificationsEnabled = true);
+        // await prefs.setBool(_notificationsKey, true);
+      }
     }
   }
 

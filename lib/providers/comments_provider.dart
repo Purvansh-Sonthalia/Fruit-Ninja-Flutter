@@ -5,6 +5,10 @@ import '../models/comment_model.dart';
 import '../services/auth_service.dart'; // To get current user ID
 import 'feed_provider.dart'; // To potentially update comment count
 import '../models/post_model.dart';
+import 'dart:convert'; // For jsonEncode
+import 'package:http/http.dart' as http; // For HTTP requests
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
+
 class CommentsProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   final AuthService _authService = AuthService();
@@ -115,9 +119,12 @@ class CommentsProvider with ChangeNotifier {
       }).select() // Select the newly inserted row
       .single(); // Expecting a single row back
 
-      // Parse the newly added comment
-      // final newComment = Comment.fromJson(response);
-      // _comments.add(newComment); // Remove optimistic add
+      // --- Send Notification --- 
+      final newCommentId = response['comment_id'];
+      final newCommentText = response['comment_text'];
+      await _sendCommentNotification(postId, userId, newCommentId, newCommentText);
+      // -------------------------
+
       log('Successfully added comment to DB for post $postId');
       
       // No need to optimistically update local list if we refetch
@@ -216,4 +223,86 @@ class CommentsProvider with ChangeNotifier {
     // Don't notify listeners here usually, as the screen is being disposed
     log('[CommentsProvider] Cleared comments state.');
   }
+
+  // --- Send Comment Notification --- 
+  Future<void> _sendCommentNotification(String postId, String commenterUserId, String commentId, String commentText) async {
+    log('[Notification] Attempting to send comment notification via /api/send-like-notification for comment $commentId on post $postId by user $commenterUserId'); // Updated log
+
+    String? postAuthorId;
+    try {
+      // 1. Fetch the post author's ID
+      final postResponse = await _supabase
+          .from('posts')
+          .select('user_id')
+          .eq('post_id', postId)
+          .single();
+      postAuthorId = postResponse['user_id'] as String?;
+
+      if (postAuthorId == null) {
+         log('[Notification] Error: Could not find post author for post $postId.');
+         return; // Cannot send notification without recipient
+      }
+
+      // 2. Prevent self-notification
+      if (postAuthorId == commenterUserId) {
+        log('[Notification] User $commenterUserId commented on their own post $postId. No notification sent.');
+        return;
+      }
+
+      // 3. Access the backend URL
+      final String? backendBaseUrl = dotenv.env['BACKEND_URL'];
+      if (backendBaseUrl == null) {
+        log('[Notification] Error: BACKEND_URL not found in .env file.');
+        return; // Stop if backend URL is not configured
+      }
+
+      // --- Define Backend Endpoint ---
+      // IMPORTANT: Using the like notification endpoint for comments as requested.
+      final String notificationUrl = '$backendBaseUrl/api/send-like-notification'; // Changed URL
+      // -------------------------------
+
+      // 4. Prepare and send the notification payload
+      //    Adjusted payload for the unified endpoint.
+      final String title = 'New comment on your post!'; // Adjusted title
+      // Use the actual comment text, truncated if necessary
+      final String body = commentText.length > 100 
+          ? '${commentText.substring(0, 97)}...'
+          : commentText;
+
+      final response = await http.post(
+        Uri.parse(notificationUrl), // Using the unified URL
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(<String, dynamic>{
+          // Fields expected by the /api/send-like-notification endpoint (potentially)
+          'recipientUserId': postAuthorId,      // Post author
+          'likerUserId': commenterUserId, // Sending commenter ID as likerUserId
+          'postId': postId,                  // ID of the post
+          
+          // Additional fields to distinguish comment notifications
+          'notificationType': 'comment',     // Explicitly state the type
+          'commentId': commentId,            // ID of the new comment
+          'commentText': commentText,        // Full comment text
+
+          // Standard notification content fields
+          'notificationTitle': title,        // Specific title for comment
+          'notificationBody': body,          // Body for the push notification (comment text)
+          
+          // Add any other relevant data your backend might need
+        }),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        log('[Notification] Comment notification sent successfully via /api/send-like-notification.'); // Updated log
+      } else {
+        log(
+          '[Notification] Failed to send comment notification via /api/send-like-notification. Status: ${response.statusCode}, Body: ${response.body}', // Updated log
+        );
+      }
+
+    } catch (e, stacktrace) {
+       log('[Notification] Error sending comment notification (via like endpoint) for post $postId: $e\n$stacktrace'); // Updated log
+      // Handle errors gracefully
+    }
+  }
+  // --- End Send Comment Notification ---
 } 

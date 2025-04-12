@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'game_screen.dart';
 import 'auth_screen.dart';
 import '../services/auth_service.dart';
@@ -8,18 +10,71 @@ import 'weather_screen.dart';
 import '../services/weather_provider.dart';
 import 'settings_screen.dart';
 import '../utils/assets_manager.dart';
+import '../services/firebase_messaging_service.dart';
 import 'feed_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<WeatherProvider>().fetchWeatherIfNeeded();
-      context.read<AssetsManager>().playBackgroundMusic();
-    });
+  State<HomeScreen> createState() => _HomeScreenState();
+}
 
+class _HomeScreenState extends State<HomeScreen> {
+  // Preference Key from SettingsScreen
+  static const String _notificationsKey = 'settings_notifications_enabled';
+
+  @override
+  void initState() {
+    super.initState();
+    // Ensure build is complete before accessing providers or doing heavy work
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Check and sync FCM token on entering the main menu
+      _checkAndSyncFcmToken();
+
+      // Existing logic moved here
+      if (mounted) { // Check if the widget is still in the tree
+        context.read<WeatherProvider>().fetchWeatherIfNeeded();
+        context.read<AssetsManager>().playBackgroundMusic();
+      }
+    });
+  }
+
+  // New method to check login/notification status and sync FCM token
+  Future<void> _checkAndSyncFcmToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final notificationsEnabled = prefs.getBool(_notificationsKey) ?? false;
+
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+
+      print(
+        'Checking FCM sync: LoggedIn=${user != null}, NotificationsEnabled=$notificationsEnabled',
+      );
+
+      // Only sync if user is logged in AND notifications are enabled in settings
+      if (user != null && notificationsEnabled) {
+        final fcmService = FirebaseMessagingService();
+        final fcmToken = await fcmService.getFcmToken();
+
+        if (fcmToken != null) {
+          print('Syncing FCM token on home screen for user ${user.id}');
+          await supabase.from('FCM-tokens').upsert({
+            'user_id': user.id,
+            'fcm_token': fcmToken,
+          });
+        } else {
+          print('Could not get FCM token for sync.');
+        }
+      }
+    } catch (e) {
+      print("Error checking/syncing FCM token on home screen: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final screenWidth = mediaQuery.size.width;
     // Calculate a responsive icon size, ensuring it's not too small or too large
