@@ -12,6 +12,8 @@ import 'package:intl/intl.dart';
 import 'package:flutter/rendering.dart';
 import '../providers/feed_provider.dart'; // Import FeedProvider
 import '../models/post_model.dart'; // Correct import for Post
+import 'comments_screen.dart'; // Import the CommentsScreen
+import '../providers/comments_provider.dart'; // Import CommentsProvider
 
 // --- New StatefulWidget for Image Viewer ---
 class PostImageViewer extends StatefulWidget {
@@ -351,6 +353,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final isLoading = feedProvider.isLoading;
     final isLoadingMore = feedProvider.isLoadingMore;
     final hasMorePosts = feedProvider.hasMorePosts;
+    final likedPostIds = context.watch<FeedProvider>().likedPostIds;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -398,6 +401,9 @@ class _FeedScreenState extends State<FeedScreen> {
   // Helper widget to build the main feed content based on state from provider
   Widget _buildFeedContent(
       List<Post> loadedPosts, bool isLoading, bool isLoadingMore, bool hasMorePosts) { 
+    // Get liked post IDs from provider (listen: true to rebuild on change)
+    final likedPostIds = context.watch<FeedProvider>().likedPostIds; 
+
     // Show loading indicator during initial fetch
     if (isLoading && loadedPosts.isEmpty) { // Check if loading AND list is empty
       return const Center(
@@ -467,6 +473,10 @@ class _FeedScreenState extends State<FeedScreen> {
         final currentUserId = authService.userId;
         final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
         final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
+        // Access FeedProvider for actions (listen: false for actions)
+        final feedProvider = Provider.of<FeedProvider>(context, listen: false); 
+        // Check if the current user liked this post
+        final bool isLikedByCurrentUser = likedPostIds.contains(post.id);
 
         return Card(
           key: ValueKey(post.id),
@@ -534,6 +544,77 @@ class _FeedScreenState extends State<FeedScreen> {
                         color: Colors.white.withOpacity(0.8),
                       ),
                     ),
+                    const SizedBox(height: 12), // Add some spacing
+                    // --- Like and Comment Row ---
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        // Like Button
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(), // Remove default padding
+                          iconSize: 20,
+                          icon: Icon(
+                             // Set icon based on like status
+                            isLikedByCurrentUser ? Icons.favorite : Icons.favorite_border, 
+                            color: isLikedByCurrentUser ? Colors.redAccent : Colors.white70,
+                          ),
+                          onPressed: () {
+                            // Call provider method
+                            feedProvider.toggleLikePost(post.id);
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${post.likeCount}', // Display like count
+                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                        const SizedBox(width: 24), // Spacing
+                        // Comment Button (Placeholder)
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(), // Remove default padding
+                          iconSize: 20,
+                          icon: const Icon(
+                            Icons.comment_outlined,
+                            color: Colors.white70,
+                          ),
+                          onPressed: () {
+                            // --- Get providers before async gap ---
+                            final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
+                            final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+                            final initialCommentCount = post.commentCount; // Store initial count
+
+                            // Navigate and wait for result (when CommentsScreen pops)
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => CommentsScreen(postId: post.id),
+                              ),
+                            ).then((result) {
+                              // --- After CommentsScreen is closed ---
+                              // Result should be the comment count returned by CommentsScreen
+                              if (result is int) {
+                                final newCount = result;
+                                log('Returned from CommentsScreen for post ${post.id}. Received count: $newCount');
+                                // Call FeedProvider to update the count locally
+                                feedProvider.updateLocalCommentCount(post.id, newCount);
+                              } else {
+                                log('Returned from CommentsScreen for post ${post.id} but did not receive a valid count. Result: $result');
+                                // Optional: Could trigger a refresh here as a fallback
+                                // feedProvider.refreshPostCommentCount(post.id);
+                              }
+                            });
+                          },
+                        ),
+                         const SizedBox(width: 4),
+                        Text(
+                          '${post.commentCount}', // Display comment count
+                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    // --- End Like and Comment Row ---
                   ],
                 ),
               ),

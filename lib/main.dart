@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/firebase_messaging_service.dart';
 import 'providers/feed_provider.dart';
+import 'providers/comments_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +62,13 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => WeatherProvider()),
         ChangeNotifierProvider.value(value: AssetsManager()),
         ChangeNotifierProvider(create: (_) => FeedProvider()),
+        ChangeNotifierProxyProvider<FeedProvider, CommentsProvider>(
+          create: (context) => CommentsProvider(
+            Provider.of<FeedProvider>(context, listen: false),
+          ),
+          update: (context, feedProvider, previousCommentsProvider) =>
+              CommentsProvider(feedProvider),
+        ),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

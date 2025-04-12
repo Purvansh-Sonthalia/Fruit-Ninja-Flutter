@@ -11,6 +11,8 @@ class Post {
   // Store the list of image data maps
   final List<Map<String, dynamic>>? imageList;
   final bool reported;
+  final int likeCount;
+  final int commentCount;
 
   Post({
     required this.id,
@@ -19,6 +21,8 @@ class Post {
     required this.createdAt,
     this.imageList,
     required this.reported,
+    required this.likeCount,
+    required this.commentCount,
   });
 
  factory Post.fromJson(Map<String, dynamic> json) {
@@ -26,7 +30,9 @@ class Post {
     if (json['post_id'] == null ||
         json['user_id'] == null ||
         json['created_at'] == null ||
-        json['reported'] == null) { // Check for reported
+        json['reported'] == null ||
+        json['like_count'] == null ||
+        json['comment_count'] == null) {
       log('Error: Missing required field in post JSON: $json');
       throw FormatException('Invalid post data received: $json');
     }
@@ -86,6 +92,8 @@ class Post {
       createdAt: DateTime.parse(json['created_at'] as String),
       imageList: parsedImageList, // Assign the parsed list
       reported: json['reported'] as bool, // Parse reported field
+      likeCount: json['like_count'] as int,
+      commentCount: json['comment_count'] as int,
     );
   }
 
