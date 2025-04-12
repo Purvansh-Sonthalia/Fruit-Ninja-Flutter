@@ -8,6 +8,7 @@ import 'dart:async'; // Import for Completer
 import 'create_post_screen.dart'; // Import the new screen
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
+import 'package:intl/intl.dart';
 
 // Define a model for the Post data for better type safety
 class Post {
@@ -386,41 +387,128 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  late Future<List<Post>> _postsFuture;
+  // State for infinite scrolling
+  final List<Post> _loadedPosts = [];
   final _supabase = Supabase.instance.client;
-  // Remove _newPostController as it's unused here
+  final ScrollController _scrollController = ScrollController();
+  bool _isLoading = false; // Tracks initial load
+  bool _isLoadingMore = false; // Tracks loading more posts
+  bool _hasMorePosts = true; // Assume there are more posts initially
+  int _currentOffset = 0;
+  static const int _fetchLimit = 10; // Number of posts to fetch each time
 
   @override
   void initState() {
     super.initState();
-    _postsFuture = _fetchPosts();
+    // Add listener to scroll controller
+    _scrollController.addListener(_onScroll);
+    // Fetch initial posts
+    _fetchInitialPosts();
   }
 
   @override
   void dispose() {
-    // No need to dispose _newPostController anymore
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<List<Post>> _fetchPosts() async {
+  // Listener for scroll events
+  void _onScroll() {
+    // Check if nearing the end and not already loading more
+    if (_scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent * 0.9 &&
+        !_isLoadingMore &&
+        _hasMorePosts &&
+        !_isLoading // Don't trigger if initial load is still happening
+        ) {
+      log('Loading more posts...'); // Log message when loading more posts
+      _loadMorePosts();
+    }
+  }
+
+  // Fetch the very first batch of posts
+  Future<void> _fetchInitialPosts() async {
+    if (_isLoading) return; // Already loading initially
+
+    setState(() {
+      _isLoading = true;
+      _loadedPosts.clear(); // Clear previous posts on initial fetch/refresh
+      _currentOffset = 0; // Reset offset
+      _hasMorePosts = true; // Reset flag
+    });
+
+    try {
+      final newPosts = await _fetchPosts(limit: _fetchLimit, offset: 0);
+      if (!mounted) return; // Check if widget is still mounted
+
+      setState(() {
+        _loadedPosts.addAll(newPosts);
+        _currentOffset = newPosts.length;
+        _hasMorePosts = newPosts.length == _fetchLimit; // Check if we got a full batch
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false); // Stop loading indicator on error
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error fetching initial posts: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      log('Error during initial fetch: $e');
+    }
+  }
+
+  // Load subsequent batches of posts
+  Future<void> _loadMorePosts() async {
+    if (_isLoadingMore || !_hasMorePosts || _isLoading) return; // Exit if already loading, no more posts, or initial load in progress
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final newPosts = await _fetchPosts(limit: _fetchLimit, offset: _currentOffset);
+      if (!mounted) return; // Check if widget is still mounted
+
+      setState(() {
+        _loadedPosts.addAll(newPosts);
+        _currentOffset += newPosts.length;
+        _hasMorePosts = newPosts.length == _fetchLimit; // Update based on this fetch
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingMore = false); // Stop loading indicator on error
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading more posts: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      log('Error loading more posts: $e');
+    }
+  }
+
+  // Modified fetch function to accept limit and offset
+  Future<List<Post>> _fetchPosts({required int limit, required int offset}) async {
     try {
       final response = await _supabase
           .from('posts')
           .select(
             'post_id, user_id, text_content, created_at, media_content',
-          ) // Explicitly select columns
+          )
           .order('created_at', ascending: false)
-          .limit(50);
+          .range(offset, offset + limit - 1); // Use range for pagination
 
-      // No need to cast to List<dynamic> if using .select()
       // Supabase client returns List<Map<String, dynamic>> directly
       final List<Map<String, dynamic>> data = response;
 
-      log('Fetched posts data: ${data.length} items');
-
-      if (data.isEmpty) {
-        return [];
-      }
+      log('Fetched posts: offset=$offset, limit=$limit, count=${data.length}');
 
       final List<Post> posts = [];
       for (var item in data) {
@@ -435,17 +523,17 @@ class _FeedScreenState extends State<FeedScreen> {
       log('Parsed posts: ${posts.length}');
       return posts;
     } catch (e, stacktrace) {
-      log('Error fetching posts: $e\n$stacktrace');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error fetching posts: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return [];
+      log('Error fetching posts (offset=$offset, limit=$limit): $e\n$stacktrace');
+      // Re-throw the error to be caught by the calling function
+      // This allows the UI to show specific error messages for initial/load more
+      rethrow;
     }
+  }
+
+  // Helper function to refresh the feed
+  Future<void> _handleRefresh() async {
+    // Trigger the initial fetch process again
+    await _fetchInitialPosts();
   }
 
   @override
@@ -467,9 +555,6 @@ class _FeedScreenState extends State<FeedScreen> {
       ),
       body: Container(
         // Ensure the gradient covers the whole screen
-        // The SafeArea might be implicitly handled by Scaffold,
-        // but if status bar overlap is an issue, we might need
-        // to adjust padding within the body later.
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -477,174 +562,183 @@ class _FeedScreenState extends State<FeedScreen> {
             colors: [Color(0xFF87CEEB), Color(0xFF4682B4)],
           ),
         ),
-        child: FutureBuilder<List<Post>>(
-          future: _postsFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              );
-            }
-            if (snapshot.hasError) {
-              log('Snapshot error in build: ${snapshot.error}');
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    'Error loading posts. Pull down to retry.\n${snapshot.error}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ),
-              );
-            }
-            if (!snapshot.hasData || snapshot.data!.isEmpty) {
-              return RefreshIndicator(
-                onRefresh: () async {
-                  setState(() {
-                    _postsFuture = _fetchPosts();
-                  });
-                },
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    SizedBox(height: MediaQuery.of(context).size.height * 0.3),
-                    const Center(
-                      child: Text(
-                        'No posts yet. Be the first!',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final posts = snapshot.data!;
-
-            return RefreshIndicator(
-              onRefresh: () async {
-                setState(() {
-                  _postsFuture = _fetchPosts();
-                });
-              },
-              child: ListView.builder(
-                // Add cacheExtent to build items further offscreen
-                cacheExtent:
-                    MediaQuery.of(context).size.height *
-                    1.5, // Cache 1.5 screens worth of items
-                padding: const EdgeInsets.all(8.0),
-                itemCount: posts.length,
-                itemBuilder: (context, index) {
-                  final post = posts[index];
-                  final bool hasImages =
-                      post.imageList != null && post.imageList!.isNotEmpty;
-
-                  // Get the current user ID
-                  final authService = Provider.of<AuthService>(context, listen: false);
-                  final currentUserId = authService.userId;
-                  final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
-
-                  return Card(
-                    margin: const EdgeInsets.symmetric(
-                      vertical: 6,
-                      horizontal: 4,
-                    ),
-                    elevation: 0,
-                    // Conditional card color
-                    color: isSelfPost
-                        ? Colors.yellow.withOpacity(0.3) // Yellow tint for self posts
-                        : Colors.green.shade900.withOpacity(0.4), // Dark green tint for others
-                    clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // --- Add Author Label ---
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
-                          child: Text(
-                            isSelfPost ? 'YOU' : 'ANONYMOUS',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              color: Colors.white.withOpacity(0.9),
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                        // Add a small spacer only if label is present
-                        const SizedBox(height: 4),
-                        // --- Use the new PostImageViewer widget ---
-                        if (hasImages)
-                          PostImageViewer(
-                            imageList: post.imageList!,
-                            postId: post.id,
-                          ),
-
-                        // --- Post Content (Text & Timestamp) ---
-                        Padding(
-                          padding: const EdgeInsets.all(
-                            16.0,
-                          ), // Add padding around text
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Only add top padding if there are images above
-                              // Adjust spacing based on whether images are present
-                              // SizedBox(height: hasImages ? 8 : 0), // Removed this fixed padding, label handles top space now
-                              Text(
-                                post.textContent,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white,
-                                  height: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${post.createdAt.toLocal().hour.toString().padLeft(2, '0')}:${post.createdAt.toLocal().minute.toString().padLeft(2, '0')} - ${post.createdAt.toLocal().day}/${post.createdAt.toLocal().month}/${post.createdAt.toLocal().year}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white.withOpacity(0.8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            );
-          },
+        // Use RefreshIndicator for pull-to-refresh
+        child: RefreshIndicator(
+          onRefresh: _handleRefresh, // Use the refresh handler
+          child: _buildFeedContent(), // Delegate content building
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final result = await Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const CreatePostScreen()),
           );
+          // Refresh the feed if a post was created
           if (result == true && mounted) {
-            setState(() {
-              _postsFuture = _fetchPosts();
-            });
+            await _handleRefresh(); // Await the refresh
           }
         },
-        icon: const Icon(Icons.add_comment_outlined),
-        label: const Text('New Post'),
+        child: const Icon(Icons.add_comment_outlined), // Keep only the icon
         backgroundColor: Colors.orangeAccent,
         foregroundColor: Colors.white,
+        shape: const CircleBorder(), // Make it circular
       ),
+    );
+  }
+
+  // Helper widget to build the main feed content based on state
+  Widget _buildFeedContent() {
+    // Show loading indicator during initial fetch
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    // Show message if no posts after initial load
+    if (_loadedPosts.isEmpty) {
+      return ListView( // Wrap in ListView to enable pull-to-refresh even when empty
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+          const Center(
+            child: Text(
+              'No posts yet. Be the first!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Build the list view with posts and potentially a loading indicator
+    return ListView.builder(
+      controller: _scrollController, // Attach the scroll controller
+      padding: const EdgeInsets.only(top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8), // Adjust top padding for transparent AppBar
+      // Add 1 to item count if we might load more or show end message
+      itemCount: _loadedPosts.length + (_hasMorePosts || !_isLoadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        // Check if it's the last item index
+        final isLastItem = index == _loadedPosts.length;
+
+        if (isLastItem) {
+          // If it's the last item, show loading or end message
+          if (_hasMorePosts) {
+            // Show loading indicator if loading more
+            return _isLoadingMore
+                ? const Center(
+                    child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                    child: CircularProgressIndicator(color: Colors.white70),
+                  ))
+                : const SizedBox.shrink(); // Or nothing if not currently loading
+          } else {
+            // Show "End of Feed" message if no more posts
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20.0),
+              child: Center(
+                child: Text(
+                  '~ End of Feed ~',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          }
+        }
+
+        // Otherwise, build the post card for the current index
+        final post = _loadedPosts[index];
+        final bool hasImages =
+            post.imageList != null && post.imageList!.isNotEmpty;
+
+        // Get the current user ID
+        final authService = Provider.of<AuthService>(context, listen: false);
+        final currentUserId = authService.userId;
+        final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
+
+        final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
+
+        return Card(
+          margin: const EdgeInsets.symmetric(
+            vertical: 6,
+            horizontal: 4,
+          ),
+          elevation: 0,
+          // Conditional card color
+          color: isSelfPost
+              ? Colors.yellow.withOpacity(0.3) // Yellow tint for self posts
+              : Colors.green.shade900.withOpacity(0.4), // Dark green tint for others
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // --- Add Author Label ---
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
+                child: Text(
+                  isSelfPost ? 'YOU' : 'ANONYMOUS',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.9),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              // Add a small spacer only if label is present
+              const SizedBox(height: 4),
+              // --- Use the new PostImageViewer widget ---
+              if (hasImages)
+                PostImageViewer(
+                  imageList: post.imageList!,
+                  postId: post.id,
+                ),
+
+              // --- Post Content (Text & Timestamp) ---
+              Padding(
+                padding: const EdgeInsets.all(
+                  16.0,
+                ), // Add padding around text
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      post.textContent,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.white,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      dateFormat.format(post.createdAt.toLocal()),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
