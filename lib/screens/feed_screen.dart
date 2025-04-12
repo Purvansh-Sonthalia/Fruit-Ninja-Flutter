@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:developer'; // For logging
 import 'dart:convert'; // Required for base64Decode, jsonDecode
 import 'dart:typed_data'; // Required for Uint8List
@@ -9,7 +8,6 @@ import 'create_post_screen.dart'; // Import the new screen
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter/rendering.dart';
 import '../providers/feed_provider.dart'; // Import FeedProvider
 import '../models/post_model.dart'; // Correct import for Post
 import 'comments_screen.dart'; // Import the CommentsScreen
@@ -390,10 +388,10 @@ class _FeedScreenState extends State<FeedScreen> {
             await _handleRefresh();
           }
         },
-        child: const Icon(Icons.add_comment_outlined),
         backgroundColor: Colors.orangeAccent,
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
+        child: const Icon(Icons.add_comment_outlined),
       ),
     );
   }

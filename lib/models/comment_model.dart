@@ -7,6 +7,7 @@ class Comment {
   final String userId;
   final String commentText;
   final DateTime createdAt;
+  final bool isAuthor;
   // final String? parentCommentId; // Optional: for threaded replies
 
   Comment({
@@ -15,6 +16,7 @@ class Comment {
     required this.userId,
     required this.commentText,
     required this.createdAt,
+    this.isAuthor = false,
     // this.parentCommentId,
   });
 
@@ -35,6 +37,7 @@ class Comment {
       userId: json['user_id'] as String,
       commentText: json['comment_text'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
+      isAuthor: json['user_id'] == json['post_id'],
       // parentCommentId: json['parent_comment_id'] as String?, // Parse if using
     );
   }

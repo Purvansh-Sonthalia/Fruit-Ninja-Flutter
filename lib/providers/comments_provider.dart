@@ -4,7 +4,7 @@ import 'dart:developer';
 import '../models/comment_model.dart';
 import '../services/auth_service.dart'; // To get current user ID
 import 'feed_provider.dart'; // To potentially update comment count
-
+import '../models/post_model.dart';
 class CommentsProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   final AuthService _authService = AuthService();
@@ -47,8 +47,15 @@ class CommentsProvider with ChangeNotifier {
       final response = await _supabase
           .from('comments')
           .select('comment_id, post_id, user_id, comment_text, created_at')
-          .eq('post_id', postId)
+          .eq('post_id', postId) //filter comments by post_id
           .order('created_at', ascending: true); 
+
+      final post = await _supabase
+          .from('posts')
+          .select('user_id')
+          .eq('post_id', postId)
+          .single();
+      String postAuthor = post['user_id'];
 
       final List<Map<String, dynamic>> data = List<Map<String, dynamic>>.from(response ?? []);
       
@@ -56,7 +63,12 @@ class CommentsProvider with ChangeNotifier {
       fetchedComments = []; 
       for (var item in data) {
         try {
-          fetchedComments.add(Comment.fromJson(item));
+          // Update Comment.fromJson to check if the comment is by the author
+          fetchedComments.add(Comment(
+            id: item['comment_id'], postId: item['post_id'], userId: item['user_id'], commentText: item['comment_text'],
+            createdAt: DateTime.parse(item['created_at']),
+            isAuthor: item['user_id'] == postAuthor
+          ));
         } catch (e) {
           log('Error parsing comment item: $item, error: $e');
         }

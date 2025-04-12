@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:developer';
 import '../providers/comments_provider.dart';
-import '../models/comment_model.dart';
 import '../services/auth_service.dart'; // To check current user
 
 class CommentsScreen extends StatefulWidget {
@@ -82,7 +81,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     final currentUserId = authService.userId;
 
     // Function to handle popping with the current comment count
-    void _popWithCommentCount() {
+    void popWithCommentCount() {
       final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
       final currentCount = commentsProvider.comments.length;
       log('[CommentsScreen] Popping with comment count: $currentCount');
@@ -92,7 +91,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     // Use WillPopScope to intercept the system back button
     return WillPopScope(
       onWillPop: () async {
-        _popWithCommentCount();
+        popWithCommentCount();
         return false; // Prevent default back navigation
       },
       child: Scaffold(
@@ -105,7 +104,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
             icon: const Icon(Icons.arrow_back_ios_new),
             tooltip: 'Back',
             onPressed: () {
-              _popWithCommentCount(); // Ensure the custom pop function is called
+              popWithCommentCount(); // Ensure the custom pop function is called
             },
           ),
         ),
@@ -157,6 +156,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       itemBuilder: (context, index) {
         final comment = comments[index];
         final bool isSelfComment = currentUserId != null && comment.userId == currentUserId;
+        final bool isAuthorComment = comment.isAuthor;
 
         // --- The actual comment content widget ---
         return Container(
@@ -176,10 +176,16 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                       isSelfComment ? 'YOU' : 'ANONYMOUS',
+                       isSelfComment ? 'YOU' : (isAuthorComment ? 'Author (OP)' : 'Anonymous'),
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 11,
+                        fontSize: isAuthorComment ? 13: 11,
+                        //isSelfComment ? 11 : 
+                        //isAuthorComment
+                        // ? 14
+                        // : 11,
+                        //11,
+
                         color: Colors.white.withOpacity(0.8),
                         letterSpacing: 0.5,
                       ),
@@ -213,7 +219,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   },
                 ),
               // --- End Delete Button ---
-            ],
+            ], // --- Conditionally add Delete Button ---
           ),
         );
         // --- End comment content widget ---

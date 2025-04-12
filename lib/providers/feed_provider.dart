@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:developer';
-import 'dart:convert'; // Add import for jsonDecode, base64Decode
-import 'dart:typed_data'; // Add import for Uint8List
+// Add import for jsonDecode, base64Decode
+// Add import for Uint8List
 // Adjust the import path based on your project structure if needed
 import '../models/post_model.dart'; // Assuming Post model might be moved later
 
@@ -25,7 +25,7 @@ class FeedProvider with ChangeNotifier {
 
   // --- State for liked posts ---
   Set<String> _likedPostIds = {};
-  bool _isLoadingLikes = false;
+  final bool _isLoadingLikes = false;
 
   // --- Getters for UI ---
   List<Post> get posts => List.unmodifiable(_loadedPosts); // Return unmodifiable list
