@@ -134,7 +134,7 @@ class HomeScreen extends StatelessWidget {
                 child: IconButton(
                   icon: Icon(
                     Icons.settings,
-                    color: Colors.white,
+                    color: Colors.grey,
                     size: iconSize, // Use responsive size
                   ),
                   onPressed: () {
@@ -184,7 +184,7 @@ class HomeScreen extends StatelessWidget {
                     child: IconButton(
                       icon: Icon(
                         Icons.feed, // Using the feed icon
-                        color: Colors.white, // Matching other icons
+                        color: Colors.green[900], // Matching other icons
                         size: iconSize, // Use responsive size
                       ),
                       onPressed: () {

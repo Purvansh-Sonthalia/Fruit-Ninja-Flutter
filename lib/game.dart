@@ -333,7 +333,7 @@ class GamePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant GamePainter oldDelegate) {
+  bool shouldRepaint(GamePainter oldDelegate) {
     if (oldDelegate.slicePoints != slicePoints) return true;
 
     if (oldDelegate.fruits.length != fruits.length) return true;
