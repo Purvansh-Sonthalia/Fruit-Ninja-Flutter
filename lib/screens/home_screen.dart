@@ -13,6 +13,9 @@ import '../utils/assets_manager.dart';
 import '../services/firebase_messaging_service.dart';
 import 'feed_screen.dart';
 import '../main.dart'; // Import routeObserver
+import 'leaderboards_screen.dart'; // Corrected import path
+import 'messages_screen.dart'; // Corrected import for MessagesScreen
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -320,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                     top: edgePadding, // Align with other top icons
                     right: edgePadding +
                         iconSize +
-                        (edgePadding / 2), // Position left of weather icon
+                        edgePadding, // Increased gap (was edgePadding / 2)
                     child: IconButton(
                       icon: Icon(
                         Icons.feed, // Using the feed icon
@@ -336,6 +339,62 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                         );
                       },
                       tooltip: 'Feeds', // Add a tooltip
+                    ),
+                  );
+                },
+              ),
+               // Leaderboard Icon Button (Moved to top-right)
+              Consumer<AuthService>(
+                builder: (context, authService, _) {
+                  if (authService.isLoggedIn == false) {
+                    return const SizedBox.shrink(); // Hide if not logged in
+                  }
+                  return Positioned(
+                    top: edgePadding,    // Align with other top icons
+                    right: edgePadding + (iconSize + edgePadding) * 2, // Adjusted position with increased gap
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.leaderboard, // Use the leaderboard icon
+                        color: Colors.yellowAccent, // Choose a suitable color
+                        size: iconSize, // Use responsive size
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const LeaderboardsScreen(), // Navigate to LeaderboardScreen
+                          ),
+                        );
+                      },
+                      tooltip: 'Leaderboard', // Add a tooltip
+                    ),
+                  );
+                },
+              ),
+               // Message Icon Button (New, next to Leaderboard)
+              Consumer<AuthService>(
+                builder: (context, authService, _) {
+                  if (authService.isLoggedIn == false) {
+                    return const SizedBox.shrink(); // Hide if not logged in
+                  }
+                  return Positioned(
+                    top: edgePadding,    // Align with other top icons
+                    right: edgePadding + (iconSize + edgePadding) * 3, // Position left of Leaderboard icon
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.message, // Use the message icon
+                        color: Colors.blue[800], // Choose a suitable dark blue color
+                        size: iconSize, // Use responsive size
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const MessagesScreen(), // Navigate to MessagesScreen
+                          ),
+                        );
+                      },
+                      tooltip: 'Messages', // Add a tooltip
                     ),
                   );
                 },

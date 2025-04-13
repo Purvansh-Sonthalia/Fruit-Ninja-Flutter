@@ -12,6 +12,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/firebase_messaging_service.dart';
 import 'providers/feed_provider.dart';
 import 'providers/comments_provider.dart';
+import 'providers/message_provider.dart';
+import 'providers/user_selection_provider.dart';
 
 // Create a RouteObserver instance
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
@@ -72,6 +74,20 @@ class MyApp extends StatelessWidget {
           ),
           update: (context, feedProvider, previousCommentsProvider) =>
               CommentsProvider(feedProvider),
+        ),
+        ChangeNotifierProxyProvider<AuthService, MessageProvider>(
+          create: (context) => MessageProvider(
+            Provider.of<AuthService>(context, listen: false),
+          ),
+          update: (context, authService, previousMessageProvider) =>
+              MessageProvider(authService),
+        ),
+        ChangeNotifierProxyProvider<AuthService, UserSelectionProvider>(
+          create: (context) => UserSelectionProvider(
+            Provider.of<AuthService>(context, listen: false),
+          ),
+          update: (context, authService, previousUserSelectionProvider) =>
+              UserSelectionProvider(authService),
         ),
       ],
       child: MaterialApp(
