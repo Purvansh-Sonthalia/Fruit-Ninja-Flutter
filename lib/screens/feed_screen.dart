@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:developer'; // For logging
+import 'dart:developer'; // Add back dart:developer
 import 'dart:convert'; // Required for base64Decode, jsonDecode
 import 'dart:typed_data'; // Required for Uint8List
 import 'dart:ui' as ui; // Import for ui.Image
@@ -83,8 +83,9 @@ class _PostImageViewerState extends State<PostImageViewer> {
             }
           }
         } catch (e) {
+          // Replace print with log
           log(
-            'Error decoding image $i for aspect ratio calculation (post ${widget.postId}): $e',
+            '[PostImageViewer] Error decoding image $i for aspect ratio calculation (post ${widget.postId}): $e',
           );
           // Ignore this image for calculation, continue with others
         }
@@ -117,8 +118,9 @@ class _PostImageViewerState extends State<PostImageViewer> {
         try {
           return base64Decode(base64String);
         } catch (e) {
+          // Replace print with log
           log(
-            'Error decoding base64 image at index $index for post ${widget.postId}: $e',
+            '[PostImageViewer] Error decoding base64 image at index $index for post ${widget.postId}: $e',
           );
           return null;
         }
@@ -168,8 +170,9 @@ class _PostImageViewerState extends State<PostImageViewer> {
         fit: BoxFit.contain, // Use contain to maintain aspect ratio
         gaplessPlayback: true, // Smoother loading
         errorBuilder: (context, error, stackTrace) {
+          // Replace print with log
           log(
-            'Error displaying single image for post ${widget.postId}: $error',
+            '[PostImageViewer] Error displaying single image for post ${widget.postId}: $error',
           );
           // Display a placeholder on error
           return Container(
@@ -329,7 +332,8 @@ class _FeedScreenState extends State<FeedScreen> {
         !feedProvider.isLoadingMore &&
         feedProvider.hasMorePosts &&
         !feedProvider.isLoading) {
-      log('Requesting loadMorePosts from provider...');
+      // Replace print with log
+      log('[FeedScreen] Requesting loadMorePosts from provider...');
       feedProvider.loadMorePosts();
     }
   }
@@ -579,31 +583,42 @@ class _FeedScreenState extends State<FeedScreen> {
                             color: Colors.white70,
                           ),
                           onPressed: () {
-                            // --- Get providers before async gap ---
-                            final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
-                            final feedProvider = Provider.of<FeedProvider>(context, listen: false);
-                            final initialCommentCount = post.commentCount; // Store initial count
+                            log('[FeedScreen] Comment button pressed for post ${post.id}'); // Replace print with log
+                            try {
+                              log('[FeedScreen] Attempting to access providers...'); // Replace print with log
+                              final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
+                              final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+                              final initialCommentCount = post.commentCount; // Store initial count
+                              log('[FeedScreen] Providers accessed successfully.'); // Replace print with log
 
-                            // Navigate and wait for result (when CommentsScreen pops)
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CommentsScreen(postId: post.id),
-                              ),
-                            ).then((result) {
-                              // --- After CommentsScreen is closed ---
-                              // Result should be the comment count returned by CommentsScreen
-                              if (result is int) {
-                                final newCount = result;
-                                log('Returned from CommentsScreen for post ${post.id}. Received count: $newCount');
-                                // Call FeedProvider to update the count locally
-                                feedProvider.updateLocalCommentCount(post.id, newCount);
-                              } else {
-                                log('Returned from CommentsScreen for post ${post.id} but did not receive a valid count. Result: $result');
-                                // Optional: Could trigger a refresh here as a fallback
-                                // feedProvider.refreshPostCommentCount(post.id);
-                              }
-                            });
+                              log('[FeedScreen] Navigating to CommentsScreen for post ${post.id}'); // Replace print with log
+                              // Navigate and wait for result (when CommentsScreen pops)
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CommentsScreen(postId: post.id),
+                                ),
+                              ).then((result) {
+                                log('[FeedScreen] Returned from CommentsScreen for post ${post.id}. Result: $result'); // Replace print with log
+                                // --- After CommentsScreen is closed ---
+                                // Result should be the comment count returned by CommentsScreen
+                                if (result is int) {
+                                  final newCount = result;
+                                  log('[FeedScreen] Received valid count: $newCount. Updating FeedProvider.'); // Replace print with log
+                                  // Call FeedProvider to update the count locally
+                                  feedProvider.updateLocalCommentCount(post.id, newCount);
+                                } else {
+                                  log('[FeedScreen] Did not receive a valid count. Result: $result'); // Replace print with log
+                                  // Optional: Could trigger a refresh here as a fallback
+                                  // feedProvider.refreshPostCommentCount(post.id);
+                                }
+                              });
+                            } catch (e, stacktrace) {
+                                log('[FeedScreen] ********** ERROR in Comment Button onPressed **********'); // Replace print with log
+                                log(e.toString());
+                                log(stacktrace.toString());
+                                log('[FeedScreen] *******************************************************'); // Replace print with log
+                            }
                           },
                         ),
                          const SizedBox(width: 4),

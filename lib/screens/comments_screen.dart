@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:developer';
+import 'dart:typed_data'; // For Uint8List
+import 'dart:io'; // For File
 import '../providers/comments_provider.dart';
 import '../services/auth_service.dart'; // To check current user
+import 'package:image_picker/image_picker.dart'; // Import image_picker
 
 class CommentsScreen extends StatefulWidget {
   final String postId;
@@ -16,21 +19,41 @@ class CommentsScreen extends StatefulWidget {
 
 class _CommentsScreenState extends State<CommentsScreen> {
   final TextEditingController _commentController = TextEditingController();
-  final ScrollController _scrollController = ScrollController(); // To scroll to bottom
+  final ScrollController _scrollController = ScrollController();
+
+  // --- State for selected image --- 
+  Uint8List? _selectedImageBytes;
+  final ImagePicker _picker = ImagePicker();
+  // --------------------------------
 
   @override
   void initState() {
     super.initState();
+    log('[CommentsScreen] initState START');
+    // Add listener to force rebuild on text change for button state
+    _commentController.addListener(_onTextChanged);
     // Fetch comments when the screen loads
     // Use addPostFrameCallback to ensure provider is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<CommentsProvider>(context, listen: false)
-          .fetchComments(widget.postId);
+      log('[CommentsScreen] addPostFrameCallback executing');
+      try {
+        log('[CommentsScreen] Attempting to access CommentsProvider...');
+        Provider.of<CommentsProvider>(context, listen: false)
+            .fetchComments(widget.postId);
+        log('[CommentsScreen] Successfully called fetchComments.');
+      } catch (e, stacktrace) {
+        log('[CommentsScreen] ********** ERROR accessing CommentsProvider or calling fetchComments **********');
+        log(e.toString());
+        log(stacktrace.toString());
+        log('[CommentsScreen] ****************************************************************************');
+      }
     });
   }
 
   @override
   void dispose() {
+    // Remove listener!
+    _commentController.removeListener(_onTextChanged);
     // Clear comments state when the screen is disposed
     // Use addPostFrameCallback to ensure it runs after build completes
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -43,33 +66,87 @@ class _CommentsScreenState extends State<CommentsScreen> {
     super.dispose();
   }
 
+  // --- Listener method to update state --- 
+  void _onTextChanged() {
+    // Call setState to rebuild the widget and update button state
+    setState(() {}); 
+  }
+  // -------------------------------------
+
+  // --- Image Picking Logic --- 
+  Future<void> _pickImage() async {
+    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70); // Added quality setting
+    if (pickedFile != null) {
+      final bytes = await pickedFile.readAsBytes();
+      // Simple size check (e.g., less than 5MB)
+      if (bytes.lengthInBytes > 5 * 1024 * 1024) {
+         if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(content: Text('Image too large (max 5MB)'), backgroundColor: Colors.orange),
+            );
+         }
+         return;
+      }
+      setState(() {
+        _selectedImageBytes = bytes;
+      });
+    } else {
+      log('No image selected.');
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _selectedImageBytes = null;
+    });
+  }
+  // --- End Image Picking Logic --- 
+
   void _addComment() async {
     final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
     final text = _commentController.text.trim();
-    if (text.isNotEmpty && !commentsProvider.isAddingComment) {
-      final success = await commentsProvider.addComment(widget.postId, text);
-      if (success && mounted) {
-        _commentController.clear();
-        // --- Scroll after frame build --- 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-           if (_scrollController.hasClients) {
-              _scrollController.animateTo(
-                _scrollController.position.maxScrollExtent,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-              );
-            }
-        });
-        // ---------------------------------
-      } else if (!success && mounted) {
-        // Show error SnackBar
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to add comment. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+
+    // Check if adding is already in progress OR if both text and image are missing
+    if (commentsProvider.isAddingComment || (text.isEmpty && _selectedImageBytes == null)) {
+      log('Add comment prevented: Already adding or no content provided.');
+      // Optionally show a snackbar if no content is provided
+      if (text.isEmpty && _selectedImageBytes == null) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text('Please enter text or select an image.'), backgroundColor: Colors.orange),
+         );
       }
+      return;
+    }
+
+    // Call provider's addComment with text and potentially image bytes
+    final success = await commentsProvider.addComment(
+      widget.postId, 
+      text,
+      imageBytes: _selectedImageBytes, // Pass selected image bytes
+    );
+
+    if (success && mounted) {
+      _commentController.clear();
+      _removeImage(); // Clear the selected image preview
+      // --- Scroll after frame build --- 
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+      });
+      // ---------------------------------
+    } else if (!success && mounted) {
+      // Show error SnackBar
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to add comment. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -157,6 +234,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
         final comment = comments[index];
         final bool isSelfComment = currentUserId != null && comment.userId == currentUserId;
         final bool isAuthorComment = comment.isAuthor;
+        final Uint8List? imageBytes = comment.imageBytes; 
+        final bool hasImage = imageBytes != null;
 
         // --- The actual comment content widget ---
         return Container(
@@ -175,25 +254,97 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                       // Priority: YOU > Author (OP) > Display Name > Anonymous
-                       isSelfComment 
-                          ? 'YOU' 
-                          : (isAuthorComment 
-                              ? 'Author (OP)' 
-                              : (comment.displayName ?? 'Anonymous')), 
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: isSelfComment ? 11 : (isAuthorComment ? 13 : 11),
-                        color: Colors.white.withOpacity(0.8),
-                        letterSpacing: 0.5,
-                      ),
+                    // User Info Row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                         Text(
+                           // Priority: YOU > Author (OP) > Display Name > Anonymous
+                           isSelfComment 
+                              ? 'YOU' 
+                              : (isAuthorComment 
+                                  ? 'Author (OP)' 
+                                  : (comment.displayName ?? 'Anonymous')), 
+                           style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: isSelfComment ? 11 : (isAuthorComment ? 13 : 11),
+                            color: Colors.white.withOpacity(0.8),
+                            letterSpacing: 0.5,
+                           ),
+                         ),
+                         // Conditionally add Delete Button to this row
+                         if (isSelfComment)
+                           SizedBox(
+                            height: 24, // Constrain height
+                            width: 24, // Constrain width
+                            child: IconButton(
+                              icon: Icon(Icons.delete_outline, color: Colors.redAccent.withOpacity(0.8), size: 18), // Adjust size
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: 'Delete Comment',
+                              // Prevent action if already deleting another comment
+                              onPressed: commentsProvider.isDeletingComment ? null : () {
+                                _confirmAndDeleteComment(context, comment.id);
+                              },
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      comment.commentText,
-                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                    ),
+                     // Display Image if available
+                    if (hasImage)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0, bottom: 8.0),
+                        child: GestureDetector(
+                          onTap: () {
+                            // --- Show full image dialog --- 
+                            showDialog(
+                              context: context,
+                              builder: (_) => Dialog(
+                                backgroundColor: Colors.transparent,
+                                insetPadding: const EdgeInsets.all(10),
+                                child: GestureDetector(
+                                  onTap: () => Navigator.of(context).pop(),
+                                  child: InteractiveViewer(
+                                    child: Center(
+                                      child: Image.memory(
+                                        imageBytes!, 
+                                        fit: BoxFit.contain,
+                                        gaplessPlayback: true,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          log('Error displaying full comment image: $error');
+                                          return const Icon(Icons.broken_image, color: Colors.white54, size: 60);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                             // --- End full image dialog --- 
+                          },
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight: MediaQuery.of(context).size.height * 0.3, // Limit image height
+                            ),
+                            child: Image.memory(
+                              imageBytes!,
+                              fit: BoxFit.contain,
+                              gaplessPlayback: true,
+                              errorBuilder: (context, error, stackTrace) {
+                                log('Error loading comment image preview: $error');
+                                return Container(height: 100, alignment: Alignment.center, child: const Icon(Icons.broken_image, color: Colors.white54, size: 40));
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Display Text if available
+                    if (comment.commentText.isNotEmpty)
+                      Text(
+                        comment.commentText,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                      ),
                     const SizedBox(height: 6),
                      Text(
                         dateFormat.format(comment.createdAt.toLocal()),
@@ -205,20 +356,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ],
                 ),
               ),
-              // --- Conditionally add Delete Button ---
-              if (isSelfComment)
-                IconButton(
-                  icon: Icon(Icons.delete_outline, color: Colors.redAccent.withOpacity(0.8), size: 20),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Delete Comment',
-                   // Prevent action if already deleting another comment
-                  onPressed: commentsProvider.isDeletingComment ? null : () {
-                     _confirmAndDeleteComment(context, comment.id);
-                  },
-                ),
-              // --- End Delete Button ---
-            ], // --- Conditionally add Delete Button ---
+              // --- Remove Delete Button from here --- 
+            ],
           ),
         );
         // --- End comment content widget ---
@@ -226,7 +365,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     );
   }
 
-   // --- Helper for delete confirmation dialog ---
+   // --- Helper for delete confirmation dialog (no changes needed) ---
   void _confirmAndDeleteComment(BuildContext buildContext, String commentId) {
      showDialog(
         context: buildContext, 
@@ -263,7 +402,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                             ),
                           );
                       }
-                      // No success SnackBar needed, optimistic UI already removed it
+                      // No success SnackBar needed, the list will refresh via provider
                   },
                   child: const Text('Delete'),
                 ),
@@ -274,10 +413,11 @@ class _CommentsScreenState extends State<CommentsScreen> {
   }
   // --- End delete confirmation ---
 
+  // --- Update Input Field Builder --- 
   Widget _buildCommentInputField(CommentsProvider commentsProvider) {
     return Container(
       padding: EdgeInsets.only(
-        left: 16.0,
+        left: 8.0, // Adjust padding
         right: 8.0,
         top: 8.0,
         bottom: MediaQuery.of(context).padding.bottom + 8.0, // Handle safe area
@@ -286,29 +426,72 @@ class _CommentsScreenState extends State<CommentsScreen> {
         color: Colors.black.withOpacity(0.1),
         border: Border(top: BorderSide(color: Colors.white.withOpacity(0.2)))
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min, // Take minimum vertical space
         children: [
-          Expanded(
-            child: TextField(
-              controller: _commentController,
-              textCapitalization: TextCapitalization.sentences,
-              minLines: 1,
-              maxLines: 4,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Add a comment...',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
-                border: InputBorder.none,
-                filled: false,
+          // --- Image Preview Row (if image selected) --- 
+          if (_selectedImageBytes != null)
+             Padding(
+               padding: const EdgeInsets.only(bottom: 8.0, left: 8.0, right: 8.0),
+               child: Row(
+                  children: [
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 60, maxWidth: 60),
+                      child: Image.memory(_selectedImageBytes!, fit: BoxFit.cover),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Image selected', style: TextStyle(color: Colors.white70)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                      tooltip: 'Remove Image',
+                      onPressed: _removeImage,
+                    ),
+                  ],
+               ),
+             ),
+           // --- Input Row (TextField and Buttons) --- 
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end, // Align items to bottom
+            children: [
+              // --- Add Image Button (only if no image selected) --- 
+              if (_selectedImageBytes == null)
+                IconButton(
+                  icon: const Icon(Icons.image_outlined, color: Colors.white70),
+                  tooltip: 'Add Image',
+                  onPressed: _pickImage,
+                ),
+               // --- Text Field --- 
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  textCapitalization: TextCapitalization.sentences,
+                  minLines: 1,
+                  maxLines: 4,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Add a comment...',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+                    border: InputBorder.none,
+                    filled: false,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 8.0), // Adjust padding
+                    isDense: true, // Make field less tall
+                  ),
+                  onSubmitted: (_) => _addComment(), // Allow sending with keyboard action
+                ),
               ),
-              onSubmitted: (_) => _addComment(), // Allow sending with keyboard action
-            ),
-          ),
-          IconButton(
-            icon: commentsProvider.isAddingComment
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white,)) 
-                : const Icon(Icons.send, color: Colors.white),
-            onPressed: commentsProvider.isAddingComment ? null : _addComment,
+              // --- Send Button --- 
+              IconButton(
+                icon: commentsProvider.isAddingComment
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white,)) 
+                    : const Icon(Icons.send, color: Colors.white),
+                // Disable if adding OR if both text and image are null
+                onPressed: commentsProvider.isAddingComment || (_commentController.text.trim().isEmpty && _selectedImageBytes == null) 
+                           ? null 
+                           : _addComment,
+              ),
+            ],
           ),
         ],
       ),
