@@ -498,7 +498,8 @@ class _FeedScreenState extends State<FeedScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      isSelfPost ? 'YOU' : 'ANONYMOUS',
+                      // Use displayName, fallback to YOU or ANONYMOUS
+                      isSelfPost ? 'YOU' : (post.displayName ?? 'ANONYMOUS'),
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12,

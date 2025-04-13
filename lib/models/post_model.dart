@@ -13,6 +13,7 @@ class Post {
   final bool reported;
   final int likeCount;
   final int commentCount;
+  final String? displayName;
 
   Post({
     required this.id,
@@ -20,12 +21,13 @@ class Post {
     required this.textContent,
     required this.createdAt,
     this.imageList,
-    required this.reported,
-    required this.likeCount,
-    required this.commentCount,
+    this.reported = false,
+    this.likeCount = 0,
+    this.commentCount = 0,
+    this.displayName,
   });
 
- factory Post.fromJson(Map<String, dynamic> json) {
+  factory Post.fromJson(Map<String, dynamic> json, {String? fetchedDisplayName}) {
     // Ensure required fields are present and have correct types
     if (json['post_id'] == null ||
         json['user_id'] == null ||
@@ -94,6 +96,7 @@ class Post {
       reported: json['reported'] as bool, // Parse reported field
       likeCount: json['like_count'] as int,
       commentCount: json['comment_count'] as int,
+      displayName: fetchedDisplayName,
     );
   }
 

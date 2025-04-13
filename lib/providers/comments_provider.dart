@@ -20,6 +20,10 @@ class CommentsProvider with ChangeNotifier {
   bool _isDeletingComment = false; // Add deleting state
   String? _currentPostId;
 
+  // Map to cache fetched display names <userId, displayName>
+  // Shared cache with FeedProvider might be better, but keep separate for now
+  final Map<String, String?> _displayNameCache = {}; 
+
   // Constructor requires FeedProvider
   CommentsProvider(this._feedProvider);
 
@@ -46,40 +50,95 @@ class CommentsProvider with ChangeNotifier {
     // --- UI should rely on _isLoading flag --- 
 
     log('Fetching comments for post: $postId');
-    List<Comment>? fetchedComments; // Use nullable temporary list
+    List<Comment>? fetchedComments;
+    String? postAuthorId; // To store the post author's ID
+
     try {
-      final response = await _supabase
+      // Fetch comments and post author concurrently
+      final results = await Future.wait([
+        _supabase
           .from('comments')
           .select('comment_id, post_id, user_id, comment_text, created_at')
-          .eq('post_id', postId) //filter comments by post_id
-          .order('created_at', ascending: true); 
-
-      final post = await _supabase
+          .eq('post_id', postId)
+          .order('created_at', ascending: true),
+        _supabase
           .from('posts')
           .select('user_id')
           .eq('post_id', postId)
-          .single();
-      String postAuthor = post['user_id'];
+          .maybeSingle(), // Use maybeSingle as post might not exist
+      ]);
 
-      final List<Map<String, dynamic>> data = List<Map<String, dynamic>>.from(response ?? []);
+      final commentResponse = results[0] as PostgrestResponse?;
+      final postResponse = results[1] as PostgrestResponse?;
+
+      final List<Map<String, dynamic>> commentData = List<Map<String, dynamic>>.from(commentResponse?.data ?? []);
+      postAuthorId = postResponse?.data?['user_id'] as String?; // Get post author ID
       
-      // Process into the temporary list
-      fetchedComments = []; 
-      for (var item in data) {
-        try {
-          // Update Comment.fromJson to check if the comment is by the author
-          fetchedComments.add(Comment(
-            id: item['comment_id'], postId: item['post_id'], userId: item['user_id'], commentText: item['comment_text'],
-            createdAt: DateTime.parse(item['created_at']),
-            isAuthor: item['user_id'] == postAuthor
-          ));
-        } catch (e) {
-          log('Error parsing comment item: $item, error: $e');
+      if (commentData.isEmpty) {
+          _comments = []; // No comments found
+      } else {
+        // Extract unique user IDs from comments needing profile lookup
+        final Set<String> userIdsToFetch = commentData
+            .map((item) => item['user_id'] as String)
+            .where((userId) => !_displayNameCache.containsKey(userId))
+            .toSet();
+        // Add post author ID if not already cached
+        if (postAuthorId != null && !_displayNameCache.containsKey(postAuthorId)) {
+            userIdsToFetch.add(postAuthorId);
         }
+
+        // Fetch profiles if needed
+        if (userIdsToFetch.isNotEmpty) {
+          log('Fetching profiles for ${userIdsToFetch.length} users in comments.');
+          try {
+              final profilesResponse = await _supabase
+                .from('profiles')
+                .select('user_id, display_name')
+                .inFilter('user_id', userIdsToFetch.toList());
+              
+              final List<dynamic> profilesData = profilesResponse as List<dynamic>? ?? [];
+              // Update cache
+              for (var profile in profilesData) {
+                final userId = profile['user_id'] as String;
+                final displayName = profile['display_name'] as String?;
+                _displayNameCache[userId] = displayName;
+              }
+              // Cache missing profiles as null
+              for (var userId in userIdsToFetch) {
+                  _displayNameCache.putIfAbsent(userId, () => null);
+              }
+          } catch (profileError) {
+              log('Error fetching profiles for comments: $profileError');
+              // Cache missing profiles as null
+              for (var userId in userIdsToFetch) {
+                  _displayNameCache.putIfAbsent(userId, () => null);
+              }
+          }
+        }
+
+        // Process into the temporary list using cached names
+        fetchedComments = []; 
+        for (var item in commentData) {
+          try {
+            final commentUserId = item['user_id'] as String;
+            final isCommentAuthor = postAuthorId != null && commentUserId == postAuthorId;
+            final fetchedDisplayName = _displayNameCache[commentUserId]; // Get from cache
+
+            fetchedComments.add(Comment.fromJson(
+              item, 
+              isCommentAuthor: isCommentAuthor, 
+              fetchedDisplayName: fetchedDisplayName,
+            ));
+          } catch (e) {
+            log('Error parsing comment item: $item, error: $e');
+          }
+        }
+         _comments = fetchedComments; // Assign ONLY after successful processing
       }
-      log('[CommentsProvider] fetchComments FINISHED loading. Fetched ${fetchedComments.length} comments for post $postId');
+
+      log('[CommentsProvider] fetchComments FINISHED loading. Processed ${fetchedComments?.length ?? 0} comments for post $postId');
       // --- Assign ONLY after successful fetch --- 
-      _comments = fetchedComments; 
+      // _comments = fetchedComments; 
       // -----------------------------------------
 
     } catch (e) {
@@ -122,7 +181,9 @@ class CommentsProvider with ChangeNotifier {
       // --- Send Notification --- 
       final newCommentId = response['comment_id'];
       final newCommentText = response['comment_text'];
-      await _sendCommentNotification(postId, userId, newCommentId, newCommentText);
+      // Fetch commenter display name from cache or use default
+      final commenterDisplayName = _displayNameCache[userId] ?? 'Someone';
+      await _sendCommentNotification(postId, userId, commenterDisplayName, newCommentId, newCommentText);
       // -------------------------
 
       log('Successfully added comment to DB for post $postId');
@@ -225,8 +286,8 @@ class CommentsProvider with ChangeNotifier {
   }
 
   // --- Send Comment Notification --- 
-  Future<void> _sendCommentNotification(String postId, String commenterUserId, String commentId, String commentText) async {
-    log('[Notification] Attempting to send comment notification via /api/send-like-notification for comment $commentId on post $postId by user $commenterUserId'); // Updated log
+  Future<void> _sendCommentNotification(String postId, String commenterUserId, String commenterDisplayName, String commentId, String commentText) async {
+    log('[Notification] Attempting to send comment notification via /api/send-like-notification for comment $commentId on post $postId by user $commenterUserId ($commenterDisplayName)'); // Updated log
 
     String? postAuthorId;
     try {
@@ -263,7 +324,7 @@ class CommentsProvider with ChangeNotifier {
 
       // 4. Prepare and send the notification payload
       //    Adjusted payload for the unified endpoint.
-      final String title = 'New comment on your post!'; // Adjusted title
+      final String title = '$commenterDisplayName commented on your post!'; // Adjusted title
       // Use the actual comment text, truncated if necessary
       final String body = commentText.length > 100 
           ? '${commentText.substring(0, 97)}...'
@@ -280,6 +341,7 @@ class CommentsProvider with ChangeNotifier {
           
           // Additional fields to distinguish comment notifications
           'notificationType': 'comment',     // Explicitly state the type
+          'commenterDisplayName': commenterDisplayName, // <-- ADDED
           'commentId': commentId,            // ID of the new comment
           'commentText': commentText,        // Full comment text
 

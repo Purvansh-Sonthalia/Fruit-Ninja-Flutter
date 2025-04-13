@@ -302,19 +302,28 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
           ],
         ),
         actions: [
-          // Pause button
-          IconButton(
-            icon: ValueListenableBuilder<GameState>(
-              valueListenable: _gameManager.stateNotifier,
-              builder: (context, state, child) {
-                return Icon(
-                  state == GameState.paused ? Icons.play_arrow : Icons.pause,
-                  color: Colors.white,
+          ValueListenableBuilder<GameState>(
+            valueListenable: _gameManager.stateNotifier,
+            builder: (context, state, child) {
+              if (state == GameState.playing) {
+                // Show Pause button when playing
+                return IconButton(
+                  icon: const Icon(Icons.pause, color: Colors.white),
+                  onPressed: () {
+                    _gameManager.togglePause();
+                  },
                 );
-              },
-            ),
-            onPressed: () {
-              _gameManager.togglePause();
+              } else {
+                // Show Leaderboard button when paused or game over
+                return IconButton(
+                  icon: const Icon(Icons.leaderboard, color: Colors.white),
+                  onPressed: () {
+                    // Navigate to Leaderboards screen
+                    // No need to explicitly pause here as the state is already paused/gameOver
+                    Navigator.pushNamed(context, '/leaderboards');
+                  },
+                );
+              }
             },
           ),
         ],

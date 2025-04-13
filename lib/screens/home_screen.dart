@@ -12,6 +12,7 @@ import 'settings_screen.dart';
 import '../utils/assets_manager.dart';
 import '../services/firebase_messaging_service.dart';
 import 'feed_screen.dart';
+import '../main.dart'; // Import routeObserver
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,24 +21,98 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  // Preference Key from SettingsScreen
+// Add RouteAware mixin
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
+  // Preference Keys
   static const String _notificationsKey = 'settings_notifications_enabled';
+  static const String _displayNameKey = 'user_display_name'; // Key for local storage
 
   @override
   void initState() {
     super.initState();
     // Ensure build is complete before accessing providers or doing heavy work
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Check and sync FCM token on entering the main menu
-      _checkAndSyncFcmToken();
+    WidgetsBinding.instance.addPostFrameCallback((_) async { // Make callback async
+      // Early exit if not mounted
+      if (!mounted) return;
 
-      // Existing logic moved here
-      if (mounted) { // Check if the widget is still in the tree
-        context.read<WeatherProvider>().fetchWeatherIfNeeded();
-        context.read<AssetsManager>().playBackgroundMusic();
-      }
+      // Get services (use read inside callbacks)
+      final authService = context.read<AuthService>();
+      final weatherProvider = context.read<WeatherProvider>();
+      final assetsManager = context.read<AssetsManager>();
+
+      // Check and sync FCM token 
+      _checkAndSyncFcmToken(); 
+      // Fetch weather and play music
+      weatherProvider.fetchWeatherIfNeeded();
+      assetsManager.playBackgroundMusic();
+
+      // --- New Logic: Check and Prompt for Display Name --- 
+      // Moved the check logic to _checkAndPromptForDisplayName
+      _checkAndPromptForDisplayName();
+      // --- End New Logic ---
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to RouteObserver
+    routeObserver.subscribe(this, ModalRoute.of(context)! as PageRoute);
+  }
+
+  @override
+  void dispose() {
+    // Unsubscribe from RouteObserver
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  // Called when the top route has been popped off, and this route is now visible.
+  @override
+  void didPopNext() {
+    print("HomeScreen: didPopNext called - Re-checking display name.");
+    // Re-check display name when returning to this screen
+    _checkAndPromptForDisplayName();
+    // Optionally, restart music if needed
+    if (mounted) {
+      context.read<AssetsManager>().playBackgroundMusic(); 
+    }
+  }
+
+  // Extracted check logic into a separate method
+  Future<void> _checkAndPromptForDisplayName() async {
+    // Early exit if not mounted
+    if (!mounted) return;
+
+    final authService = context.read<AuthService>();
+
+    if (authService.isLoggedIn) {
+      final prefs = await SharedPreferences.getInstance();
+      final localName = prefs.getString(_displayNameKey)?.trim() ?? '';
+      String? remoteName;
+
+      // Only check Supabase if local name is empty to save a network call
+      if (localName.isEmpty) {
+        remoteName = await authService.getCurrentDisplayName();
+        remoteName = remoteName?.trim() ?? ''; // Ensure trimmed and non-null
+        // Optional: If remote name exists but local doesn't, save it locally
+        if (remoteName.isNotEmpty) {
+          await prefs.setString(_displayNameKey, remoteName); 
+        }
+      }
+
+      // Prompt if BOTH local and remote names are effectively empty
+      if (localName.isEmpty && (remoteName == null || remoteName.isEmpty)) {
+        print("User logged in but display name not set. Prompting...");
+        // Ensure dialog isn't shown if context is no longer valid
+        if (mounted) { 
+          // Use a short delay to avoid potential build conflicts when called from didPopNext
+          Future.delayed(Duration.zero, () { 
+              if(mounted) _showDisplayNameDialog(context, authService);
+          });
+        }
+      }
+    }
   }
 
   // New method to check login/notification status and sync FCM token
@@ -131,10 +206,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     }),
                     const SizedBox(height: 20),
 
-                    // How to Play Button
-                    _buildMenuButton(context, 'HOW TO PLAY', Colors.orange, () {
-                      _showHowToPlayDialog(context);
-                    }),
+                    // Set Display Name Button (Replaces How to Play)
+                    Consumer<AuthService>(
+                      builder: (ctx, authService, _) {
+                        if (!authService.isLoggedIn) {
+                          return const SizedBox.shrink(); // Hide if not logged in
+                        }
+                        return _buildMenuButton(
+                          context,
+                          'SET DISPLAY NAME',
+                          Colors.orange, // Changed color
+                          () => _showDisplayNameDialog(context, authService),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 20),
 
                     // Auth Button (Login/SignUp or Logout)
@@ -296,54 +381,103 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showHowToPlayDialog(BuildContext context) {
+  // New Dialog for Setting Display Name
+  Future<void> _showDisplayNameDialog(BuildContext context, AuthService authService) async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentName = prefs.getString(_displayNameKey) ?? ''; // Load from local storage
+    final controller = TextEditingController(text: currentName);
+    final formKey = GlobalKey<FormState>();
+    bool isSaving = false; // To prevent multiple saves
+
+    if (!mounted) return; // Check if widget is still mounted
+
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text(
-              'How to Play',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            content: const SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '1. Swipe across the screen to slice fruits',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    '2. Each sliced fruit gives you points',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    '3. Missing fruits will cost you quarter of a life',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    '4. Avoid slicing bombs or you\'ll lose instantly',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    '5. The game gets faster as you progress',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ],
+      barrierDismissible: !isSaving, // Prevent dismissal while saving
+      builder: (context) => StatefulBuilder( // Use StatefulBuilder for loading indicator
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Set Display Name'),
+            content: Form(
+              key: formKey,
+              child: TextFormField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: 'Enter your display name',
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Display name cannot be empty.';
+                  }
+                  if (value.length > 20) { // Example length limit
+                      return 'Name cannot exceed 20 characters.';
+                  }
+                  // Add more validation if needed (e.g., allowed characters)
+                  return null;
+                },
               ),
             ),
-            actions: [
+            actions: <Widget>[
               TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Got it!'),
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        if (formKey.currentState!.validate()) {
+                          setDialogState(() => isSaving = true);
+                          final newName = controller.text.trim();
+                          String? errorMessage;
+                          bool success = false;
+
+                          try {
+                            success = await authService.updateDisplayName(newName);
+                            if (!success) {
+                              // Check if it failed because the name was taken
+                              // AuthService.updateDisplayName returns false if taken
+                              errorMessage = 'Display name \'$newName\' is already taken.';
+                            } else {
+                              // Save to local storage on success
+                              await prefs.setString(_displayNameKey, newName);
+                            }
+                          } catch (e) {
+                            print("Caught error in dialog: $e");
+                            errorMessage = 'An error occurred. Please try again.';
+                          } finally {
+                            setDialogState(() => isSaving = false);
+                          }
+
+                          if (!mounted) return; // Check again after async operation
+
+                          if (success) {
+                            Navigator.pop(context); // Close dialog on success
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Display name saved as \'$newName\'!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } else if (errorMessage != null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(errorMessage),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            // Keep dialog open on failure
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))) 
+                    : const Text('Save'),
               ),
             ],
-          ),
+          );
+        },
+      ),
     );
   }
 

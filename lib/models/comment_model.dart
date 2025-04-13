@@ -8,6 +8,7 @@ class Comment {
   final String commentText;
   final DateTime createdAt;
   final bool isAuthor;
+  final String? displayName;
   // final String? parentCommentId; // Optional: for threaded replies
 
   Comment({
@@ -16,11 +17,12 @@ class Comment {
     required this.userId,
     required this.commentText,
     required this.createdAt,
-    this.isAuthor = false,
+    required this.isAuthor,
+    this.displayName,
     // this.parentCommentId,
   });
 
-  factory Comment.fromJson(Map<String, dynamic> json) {
+  factory Comment.fromJson(Map<String, dynamic> json, {String? fetchedDisplayName, required bool isCommentAuthor}) {
     // Basic validation
     if (json['comment_id'] == null ||
         json['post_id'] == null ||
@@ -37,7 +39,8 @@ class Comment {
       userId: json['user_id'] as String,
       commentText: json['comment_text'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
-      isAuthor: json['user_id'] == json['post_id'],
+      isAuthor: isCommentAuthor,
+      displayName: fetchedDisplayName,
       // parentCommentId: json['parent_comment_id'] as String?, // Parse if using
     );
   }

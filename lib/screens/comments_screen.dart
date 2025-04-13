@@ -176,16 +176,15 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                       isSelfComment ? 'YOU' : (isAuthorComment ? 'Author (OP)' : 'Anonymous'),
+                       // Priority: YOU > Author (OP) > Display Name > Anonymous
+                       isSelfComment 
+                          ? 'YOU' 
+                          : (isAuthorComment 
+                              ? 'Author (OP)' 
+                              : (comment.displayName ?? 'Anonymous')), 
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: isAuthorComment ? 13: 11,
-                        //isSelfComment ? 11 : 
-                        //isAuthorComment
-                        // ? 14
-                        // : 11,
-                        //11,
-
+                        fontSize: isSelfComment ? 11 : (isAuthorComment ? 13 : 11),
                         color: Colors.white.withOpacity(0.8),
                         letterSpacing: 0.5,
                       ),

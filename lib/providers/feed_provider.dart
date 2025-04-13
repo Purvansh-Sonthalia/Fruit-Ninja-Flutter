@@ -30,6 +30,9 @@ class FeedProvider with ChangeNotifier {
   Set<String> _likedPostIds = {};
   final bool _isLoadingLikes = false;
 
+  // Map to cache fetched display names <userId, displayName>
+  final Map<String, String?> _displayNameCache = {};
+
   // --- Getters for UI ---
   List<Post> get posts => List.unmodifiable(_loadedPosts); // Return unmodifiable list
   bool get isLoading => _isLoading;
@@ -123,6 +126,10 @@ class FeedProvider with ChangeNotifier {
       _hasMorePosts = fetchedPosts.length == _fetchLimit;
       _likedPostIds = fetchedLikedIds; // Update with fetched or existing likes
 
+      // --- Fetch Profiles for the fetched posts --- 
+      // This now happens within _fetchPosts, so no separate call needed here.
+      // -------------------------------------------
+
     } catch (e) {
       log('Error during initial fetch/likes fetch in Provider: $e');
       _hasMorePosts = false; // Assume no more posts on error
@@ -156,6 +163,9 @@ class FeedProvider with ChangeNotifier {
       _loadedPosts.addAll(newPosts);
       _currentOffset += newPosts.length;
       _hasMorePosts = newPosts.length == _fetchLimit;
+      // --- Fetch Profiles for the new posts --- 
+      // This now happens within _fetchPosts, so no separate call needed here.
+      // ------------------------------------------
     } catch (e) {
       log('Error loading more posts in Provider: $e');
       _hasMorePosts = false; // Stop trying to load more on error
@@ -167,6 +177,7 @@ class FeedProvider with ChangeNotifier {
 
   Future<List<Post>> _fetchPosts({required int limit, required int offset}) async {
     try {
+      // 1. Fetch basic post data
       final response = await _supabase
           .from('posts')
           .select(
@@ -175,21 +186,62 @@ class FeedProvider with ChangeNotifier {
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
-      // Response might be null if there's an issue, handle gracefully
-      final List<Map<String, dynamic>> data = List<Map<String, dynamic>>.from(response ?? []);
+      final List<Map<String, dynamic>> postData = List<Map<String, dynamic>>.from(response ?? []);
+      if (postData.isEmpty) {
+        return []; // No posts fetched
+      }
 
-      log('Fetched posts (Provider): offset=$offset, limit=$limit, count=${data.length}');
+      log('Fetched basic posts (Provider): offset=$offset, limit=$limit, count=${postData.length}');
 
-      final List<Post> posts = [];
-      for (var item in data) {
+      // 2. Extract unique user IDs needing profile lookup
+      final Set<String> userIdsToFetch = postData
+          .map((item) => item['user_id'] as String)
+          // Only fetch if not already cached
+          .where((userId) => !_displayNameCache.containsKey(userId))
+          .toSet();
+
+      // 3. Fetch profiles if needed
+      if (userIdsToFetch.isNotEmpty) {
+        log('Fetching profiles for ${userIdsToFetch.length} users.');
         try {
-          posts.add(Post.fromJson(item));
+           final profilesResponse = await _supabase
+            .from('profiles')
+            .select('user_id, display_name')
+            .inFilter('user_id', userIdsToFetch.toList());
+          
+           final List<dynamic> profilesData = profilesResponse as List<dynamic>? ?? [];
+           // Update cache
+           for (var profile in profilesData) {
+             final userId = profile['user_id'] as String;
+             final displayName = profile['display_name'] as String?;
+             _displayNameCache[userId] = displayName; // Store fetched name (or null)
+           }
+           // Ensure IDs that weren't found are also cached (as null)
+           for (var userId in userIdsToFetch) {
+              _displayNameCache.putIfAbsent(userId, () => null);
+           }
+        } catch (profileError) {
+            log('Error fetching profiles for posts: $profileError');
+            // Cache missing profiles as null to avoid refetching constantly
+            for (var userId in userIdsToFetch) {
+               _displayNameCache.putIfAbsent(userId, () => null);
+            }
+        }
+      }
+
+      // 4. Create Post objects using cached display names
+      final List<Post> posts = [];
+      for (var item in postData) {
+        try {
+          final userId = item['user_id'] as String;
+          final fetchedDisplayName = _displayNameCache[userId]; // Get from cache (might be null)
+          posts.add(Post.fromJson(item, fetchedDisplayName: fetchedDisplayName));
         } catch (e) {
           log('Error parsing post item (Provider): $item, error: $e');
           // Skip invalid items
         }
       }
-      log('Parsed posts (Provider): ${posts.length}');
+      log('Parsed posts with display names (Provider): ${posts.length}');
       return posts;
     } catch (e, stacktrace) {
       log('Error fetching posts (Provider) (offset=$offset, limit=$limit): $e\n$stacktrace');
@@ -347,7 +399,8 @@ class FeedProvider with ChangeNotifier {
 
           log('Successfully liked post $postId for user $userId');
           // --- Send Notification ---
-          await _sendLikeNotification(post.userId, userId, postId);
+          final likerDisplayName = _displayNameCache[userId] ?? 'Someone';
+          await _sendLikeNotification(post.userId, userId, likerDisplayName, postId);
           // -------------------------
           return true; // Indicate success
         } catch (e) {
@@ -436,7 +489,7 @@ class FeedProvider with ChangeNotifier {
   }
 
   // --- Placeholder for Sending Like Notification ---
-  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId, String postId) async {
+  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId, String likerDisplayName, String postId) async {
     // Prevent self-notification
     if (postAuthorId == likerUserId) {
        log('[Notification] User $likerUserId liked their own post $postId. No notification sent.');
@@ -460,8 +513,8 @@ class FeedProvider with ChangeNotifier {
     try {
        // Prepare the notification payload
        // TODO: Consider fetching the liker's display name/username if needed for the notification body
-       final String title = 'Someone liked your post!';
-       final String body = 'A user liked your post.'; // Example body
+       final String title = '$likerDisplayName liked your post!'; // Use display name
+       final String body = '$likerDisplayName liked your post.'; // Example body
 
       final response = await http.post(
         Uri.parse(likeNotificationUrl),

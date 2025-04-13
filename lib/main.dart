@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:fruit_ninja_flutter/screens/home_screen.dart';
+import 'package:fruit_ninja_flutter/screens/leaderboards_screen.dart';
 import 'package:fruit_ninja_flutter/services/auth_service.dart';
 import 'package:fruit_ninja_flutter/services/weather_provider.dart';
 import 'package:fruit_ninja_flutter/utils/assets_manager.dart';
@@ -11,6 +12,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/firebase_messaging_service.dart';
 import 'providers/feed_provider.dart';
 import 'providers/comments_provider.dart';
+
+// Create a RouteObserver instance
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,7 +88,11 @@ class MyApp extends StatelessWidget {
           ),
         ),
         themeMode: ThemeMode.dark,
+        navigatorObservers: [routeObserver],
         home: const HomeScreen(),
+        routes: {
+          '/leaderboards': (context) => const LeaderboardsScreen(),
+        },
       ),
     );
   }
