@@ -78,6 +78,7 @@ class GameManager {
     fruits.clear();
     isHighScoreSaved = false;
     highScoreSavedNotifier.value = false;
+    _initializeGame(); // Reset combo here
 
     scoreNotifier.value = score;
     livesNotifier.value = lives;
@@ -104,6 +105,7 @@ class GameManager {
     _state = GameState.gameOver;
     stateNotifier.value = _state;
     _spawnTimer?.cancel();
+    _endGameCleanup(); // Reset combo on game over
 
     // Update high score if necessary
     if (score > highScore) {
@@ -203,11 +205,11 @@ class GameManager {
     // Adjusted speed to balance lower gravity (800 vs 980)
     // Reduced from 1000 to 900 for the base speed
     // Reduced from 400 to 350 for the variable component
-    double speed = 800 + random.nextDouble() * 350 * _difficultyMultiplier;
+    double speed = 900 + random.nextDouble() * 350 * _difficultyMultiplier;
 
     // More vertical angle for higher jumps
     // Changed to -pi/4 to -3pi/4 for more vertical trajectory
-    double angle = -pi / 4 - random.nextDouble() * pi / 2;
+    double angle = -pi / 6 - random.nextDouble() * pi / 3;
 
     // Calculate initial velocity components
     double vx = cos(angle) * speed;
@@ -233,6 +235,29 @@ class GameManager {
         rotationSpeed: (random.nextDouble() * 4 - 2) * pi, // Random rotation
       ),
     );
+  }
+
+  // Combo mechanism
+  int comboCount = 0;
+  Timer? _comboTimer;
+  final ValueNotifier<int> comboNotifier = ValueNotifier<int>(0);
+  static const Duration comboWindow = Duration(milliseconds: 1200); // Time allowed between slices for combo (Updated to 1.2s)
+  static const int maxCombo = 7; // Maximum combo multiplier
+
+  void _resetCombo() {
+    comboCount = 0;
+    comboNotifier.value = 0;
+    _comboTimer?.cancel();
+  }
+
+  // Call this when starting a new game
+  void _initializeGame() {
+     _resetCombo();
+  }
+
+  // Call this when game ends
+  void _endGameCleanup() {
+     _resetCombo();
   }
 
   // Update game state
@@ -265,6 +290,7 @@ class GameManager {
             double oldLives = lives;
             lives = max(0, lives - 0.25); // Deduct quarter of a heart
             livesNotifier.value = lives;
+            _resetCombo(); // Reset combo on miss
 
             // Show warning notifications based on health level
             if (lives <= 0.5 && oldLives > 0.5) {
@@ -293,45 +319,55 @@ class GameManager {
   void processSlice(LineSegment sliceSegment, Offset sliceDirection) {
     if (_state != GameState.playing) return;
 
-    bool slicedAny = false;
-    bool slicedBomb = false;
+    int fruitsSlicedThisAction = 0;
+    int scoreAddedThisAction = 0; // Track score gained in this single swipe
+    bool slicedBombThisAction = false;
 
     for (var fruit in fruits) {
       if (!fruit.isSliced && fruit.isSlicedByLine(sliceSegment)) {
-        // Slice the fruit - NO angle needed here anymore
         fruit.slice(sliceDirection);
 
         if (fruit.type == FruitType.bomb) {
-          slicedBomb = true;
+          slicedBombThisAction = true;
           _assetsManager.playSound('bomb');
-          // Slicing a bomb causes instant death
+          _resetCombo(); // Reset combo on bomb
           lives = 0;
           livesNotifier.value = lives;
-
-          // Show death message
           showNotification('💥 BOOM! Instant Death! 💥');
-
-          // Delay the game over screen slightly for dramatic effect
-          Future.delayed(const Duration(milliseconds: 400), () {
-            gameOver();
-          });
+          Future.delayed(const Duration(milliseconds: 400), gameOver);
+          break;
         } else {
-          slicedAny = true;
-          // Add score
-          score += fruit.score;
-          scoreNotifier.value = score;
+          fruitsSlicedThisAction++;
+          comboCount++; // Increment combo streak
+          comboCount = min(comboCount, maxCombo); // Cap combo
+
+          // Multiply score by combo (min 1, max 7)
+          int pointsToAdd = fruit.score * max(1, comboCount);
+          score += pointsToAdd;
+          scoreAddedThisAction += pointsToAdd;
         }
       }
     }
 
-    // Play slice sound using AssetsManager
-    if (slicedAny && !slicedBomb) {
+    if (slicedBombThisAction) {
+       return;
+    }
+
+    if (fruitsSlicedThisAction > 0) {
+      scoreNotifier.value = score;
+      comboNotifier.value = comboCount;
+
       _assetsManager.playSound('slice');
+
+      _comboTimer?.cancel();
+      _comboTimer = Timer(comboWindow, _resetCombo);
     }
   }
 
   // Clean up resources
   void dispose() {
     _spawnTimer?.cancel();
+    _comboTimer?.cancel();
   }
 }
+

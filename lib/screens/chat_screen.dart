@@ -6,6 +6,7 @@ import 'dart:io'; // For File
 import 'dart:typed_data'; // For Uint8List
 import 'package:image_picker/image_picker.dart'; // Import image_picker
 import 'dart:convert'; // Import dart:convert for base64Encode
+import 'dart:async'; // Import for Timer
 
 import '../providers/message_provider.dart';
 import '../services/auth_service.dart';
@@ -31,6 +32,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Message? _replyingToMessage;
   Uint8List? _selectedImageBytes;
   String? _selectedImageName;
+  Timer? _pollingTimer; // Add timer instance variable
 
   @override
   void initState() {
@@ -38,14 +40,28 @@ class _ChatScreenState extends State<ChatScreen> {
     // Fetch initial messages for this specific chat
     log('[ChatScreen] Init for chat with ${widget.otherUserName} (ID: ${widget.otherUserId})');
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchChatMessages();
+      _fetchInitialChatMessages(); // Call the renamed initial fetch method
+
+      // Start polling for new messages every second
+      _pollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        // Check if the widget is still mounted before fetching
+        if (mounted) {
+          // Call the new incremental fetch method
+          // log('[ChatScreen] Polling for new messages...'); // Less verbose logging now
+           Provider.of<MessageProvider>(context, listen: false)
+                .fetchNewMessagesForChat(widget.otherUserId);
+        } else {
+          timer.cancel(); // Cancel timer if widget is disposed mid-interval
+        }
+      });
     });
 
     // Optional: Scroll to bottom when keyboard appears/disappears
     // Consider using flutter_keyboard_visibility package for more robust handling
   }
 
-  Future<void> _fetchChatMessages() async {
+  // Renamed for clarity: Fetches the initial full list
+  Future<void> _fetchInitialChatMessages() async {
     final provider = Provider.of<MessageProvider>(context, listen: false);
     await provider.fetchMessagesForChat(widget.otherUserId);
     // Optional: Scroll to bottom after fetching
@@ -56,6 +72,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _pollingTimer?.cancel(); // Cancel the timer when the widget is disposed
     super.dispose();
   }
 

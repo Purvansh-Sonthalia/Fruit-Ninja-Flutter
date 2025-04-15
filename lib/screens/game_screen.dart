@@ -383,7 +383,6 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
               if (notification == null) {
                 return const SizedBox.shrink();
               }
-              
               Color bgColor = notification.contains('BOOM') 
                   ? Colors.red 
                   : notification.contains('Critical') 
@@ -391,7 +390,6 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
                       : notification.contains('Low Health') 
                           ? Colors.amber 
                           : Colors.green;
-              
               return Positioned(
                 top: MediaQuery.of(context).padding.top + 60,
                 left: 0,
@@ -444,6 +442,53 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
                 ),
               );
             },
+          ),
+          // Combo streak overlay
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 110,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: ValueListenableBuilder<int>(
+                valueListenable: _gameManager.comboNotifier,
+                builder: (context, combo, _) {
+                  if (combo <= 1) return const SizedBox.shrink();
+                  return AnimatedOpacity(
+                    opacity: combo > 1 ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.deepPurple.withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        'Combo x$combo!',
+                        style: const TextStyle(
+                          color: Colors.yellow,
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black,
+                              blurRadius: 4,
+                              offset: Offset(1, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ],
       ),

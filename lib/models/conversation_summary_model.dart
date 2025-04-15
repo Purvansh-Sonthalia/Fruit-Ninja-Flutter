@@ -6,6 +6,7 @@ class ConversationSummary {
   final String otherUserDisplayName;
   final String lastMessageText;
   final DateTime lastMessageTimestamp;
+  final String lastMessageFromUserId;
   // final bool isRead; // Optional: Add later if needed
 
   const ConversationSummary({
@@ -13,6 +14,7 @@ class ConversationSummary {
     required this.otherUserDisplayName,
     required this.lastMessageText,
     required this.lastMessageTimestamp,
+    required this.lastMessageFromUserId,
     // required this.isRead,
   });
 

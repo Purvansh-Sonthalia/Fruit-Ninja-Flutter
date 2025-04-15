@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/message_provider.dart';
 import '../models/conversation_summary_model.dart';
+import '../services/auth_service.dart';
 import 'dart:developer';
 import 'chat_screen.dart';
 import 'user_selection_screen.dart';
@@ -34,7 +35,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   Widget build(BuildContext context) {
     final messageProvider = context.watch<MessageProvider>();
-    // No longer need AuthService or currentUserId directly here
+    // Get AuthService and current user ID
+    final authService = context.read<AuthService>();
+    final currentUserId = authService.userId;
+
     final summaries = messageProvider.conversationSummaries;
     final isLoading = messageProvider.isLoading;
     final hasError = messageProvider.hasError;
@@ -70,6 +74,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
             hasError,
             errorMessage,
             summaries,
+            currentUserId,
           ),
         ),
       ),
@@ -96,6 +101,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
     bool hasError,
     String errorMessage,
     List<ConversationSummary> summaries,
+    String? currentUserId,
   ) {
     // Show loading indicator during initial fetch
     if (isLoading && summaries.isEmpty) {
@@ -147,6 +153,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
         final DateFormat timeFormat = DateFormat('HH:mm'); // Or use timeago package
         final String formattedTime = timeFormat.format(summary.lastMessageTimestamp.toLocal());
 
+        // Check if the last message was sent by the current user
+        final bool lastMessageIsMine = summary.lastMessageFromUserId == currentUserId;
+        final String messagePrefix = lastMessageIsMine ? 'You: ' : '';
+
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), // Add some spacing
           decoration: BoxDecoration(
@@ -165,7 +175,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
             ),
             subtitle: Text(
-              summary.lastMessageText,
+              '$messagePrefix${summary.lastMessageText}',
               style: TextStyle(color: Colors.white.withOpacity(0.8)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

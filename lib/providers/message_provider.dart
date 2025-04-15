@@ -24,6 +24,7 @@ class MessageProvider with ChangeNotifier {
   Map<String, bool> _chatLoading = {};
   Map<String, bool> _chatHasError = {};
   Map<String, String> _chatErrorMessage = {};
+  Map<String, DateTime?> _latestMessageTimestampPerChat = {}; // Added: Track latest timestamp per chat
 
   bool _isLoading = false;
   bool _hasError = false;
@@ -138,6 +139,7 @@ class MessageProvider with ChangeNotifier {
           otherUserDisplayName: otherUserName,
           lastMessageText: latestMessage.messageText ?? '[Media Message]', // Placeholder for media
           lastMessageTimestamp: latestMessage.createdAt,
+          lastMessageFromUserId: latestMessage.fromUserId,
         );
       }).toList();
 
@@ -165,7 +167,7 @@ class MessageProvider with ChangeNotifier {
     }
   }
 
-  // Fetch messages for a specific conversation
+  // Fetch messages for a specific conversation (Initial Fetch)
   Future<void> fetchMessagesForChat(String otherUserId) async {
     final currentUserId = _authService.userId;
     if (currentUserId == null) return; // Should be logged in
@@ -173,10 +175,11 @@ class MessageProvider with ChangeNotifier {
     // Prevent concurrent fetches for the same chat
     if (_chatLoading[otherUserId] ?? false) return;
 
-    log('[MessageProvider] Fetching messages for chat with $otherUserId');
+    log('[MessageProvider] Fetching initial messages for chat with $otherUserId');
     _chatLoading[otherUserId] = true;
     _chatHasError[otherUserId] = false;
     _chatErrorMessage[otherUserId] = '';
+    _latestMessageTimestampPerChat.remove(otherUserId); // Clear timestamp for initial full fetch
     notifyListeners();
 
     try {
@@ -188,24 +191,29 @@ class MessageProvider with ChangeNotifier {
           .limit(100); // Limit fetch size for a single chat
 
       final List<dynamic> messagesData = response as List<dynamic>;
-      log('[MessageProvider] Fetched ${messagesData.length} messages for chat $otherUserId.');
+      log('[MessageProvider] Fetched ${messagesData.length} initial messages for chat $otherUserId.');
 
-      // Note: We are NOT fetching profiles again here. MessagesScreen already did.
-      // The Message model doesn't store display names fetched this way.
-      // ChatScreen will get display names from its parameters.
-      _chatMessages[otherUserId] = messagesData
+      final List<Message> fetchedMessages = messagesData
           .map((msgData) => Message.fromJson(msgData as Map<String, dynamic>))
           .toList();
+
+      _chatMessages[otherUserId] = fetchedMessages;
+
+      // Store the timestamp of the newest message (if any) for incremental fetching
+      if (fetchedMessages.isNotEmpty) {
+          _latestMessageTimestampPerChat[otherUserId] = fetchedMessages.first.createdAt;
+          log('[MessageProvider] Stored latest timestamp for chat $otherUserId: ${_latestMessageTimestampPerChat[otherUserId]}');
+      }
 
       _chatLoading[otherUserId] = false;
       _chatHasError[otherUserId] = false;
     } on PostgrestException catch (e) {
-      log('[MessageProvider] PostgrestException fetching chat messages: ${e.message}', error: e);
+      log('[MessageProvider] PostgrestException fetching initial chat messages: ${e.message}', error: e);
       _chatLoading[otherUserId] = false;
       _chatHasError[otherUserId] = true;
       _chatErrorMessage[otherUserId] = 'Error fetching messages: ${e.message}';
     } catch (e, stacktrace) {
-      log('[MessageProvider] Generic error fetching chat messages: $e', error: e, stackTrace: stacktrace);
+      log('[MessageProvider] Generic error fetching initial chat messages: $e', error: e, stackTrace: stacktrace);
       _chatLoading[otherUserId] = false;
       _chatHasError[otherUserId] = true;
       _chatErrorMessage[otherUserId] = 'An unexpected error occurred.';
@@ -214,6 +222,118 @@ class MessageProvider with ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  // Fetch only NEW messages for a specific conversation (Polling/Incremental Fetch)
+  Future<void> fetchNewMessagesForChat(String otherUserId) async {
+      final currentUserId = _authService.userId;
+      if (currentUserId == null) return; // Should be logged in
+
+      final lastKnownTimestamp = _latestMessageTimestampPerChat[otherUserId];
+      // If we don't have a timestamp, we shouldn't be polling yet, maybe trigger initial fetch?
+      // For now, just exit if no timestamp exists. Initial fetch should establish it.
+      if (lastKnownTimestamp == null) {
+          log('[MessageProvider] No last known timestamp for chat $otherUserId. Cannot fetch new messages.');
+          // Optionally: Trigger fetchMessagesForChat(otherUserId) here? Or rely on UI logic.
+          return;
+      }
+
+      // log('[MessageProvider] Polling for new messages in chat $otherUserId since $lastKnownTimestamp');
+
+      try {
+          // --- Query 1: Fetch NEW full messages --- 
+          final newMessagesResponse = await _supabase
+              .from('messages')
+              .select('*')
+              .or('and(from_user_id.eq.$currentUserId,to_user_id.eq.$otherUserId),and(from_user_id.eq.$otherUserId,to_user_id.eq.$currentUserId)')
+              .gt('created_at', lastKnownTimestamp.toIso8601String()) // Fetch messages strictly newer
+              .order('created_at', ascending: true); // Fetch oldest new messages first
+
+          final List<dynamic> newMessagesData = newMessagesResponse as List<dynamic>;
+          DateTime? latestTimestampInNewBatch;
+          final List<Message> newMessages = newMessagesData.map((msgData) {
+              final message = Message.fromJson(msgData as Map<String, dynamic>);
+              // Track the latest timestamp from this new batch
+              if (latestTimestampInNewBatch == null || message.createdAt.isAfter(latestTimestampInNewBatch!)) {
+                  latestTimestampInNewBatch = message.createdAt;
+              }
+              return message;
+          }).toList();
+
+          // --- Query 2: Fetch RECENT message IDs (to detect deletions) ---
+          const int recentMessageLimit = 100; // How many recent messages to check
+          final recentIdsResponse = await _supabase
+              .from('messages')
+              .select('message_id') // Select only IDs
+              .or('and(from_user_id.eq.$currentUserId,to_user_id.eq.$otherUserId),and(from_user_id.eq.$otherUserId,to_user_id.eq.$currentUserId)')
+              .order('created_at', ascending: false) // Get the most recent ones
+              .limit(recentMessageLimit);
+          
+          final List<dynamic> recentIdsData = recentIdsResponse as List<dynamic>;
+          final Set<String> recentServerIds = recentIdsData
+              .map((data) => data['message_id'] as String)
+              .toSet();
+
+          // --- Compare local state with server state ---
+          final List<Message> currentLocalMessages = List<Message>.from(_chatMessages[otherUserId] ?? []);
+          final Set<String> currentLocalIds = currentLocalMessages.map((m) => m.messageId).toSet();
+
+          // Identify deleted messages (present locally, but not in recent server IDs)
+          final Set<String> deletedIds = currentLocalIds.difference(recentServerIds);
+          // Identify truly new messages (fetched in query 1, but not already present locally)
+          final List<Message> trulyNewMessages = newMessages
+              .where((newMessage) => !currentLocalIds.contains(newMessage.messageId))
+              .toList();
+
+          bool changed = false;
+          List<Message> updatedMessages = currentLocalMessages;
+
+          // Apply deletions if any found
+          if (deletedIds.isNotEmpty) {
+              log('[MessageProvider] Detected ${deletedIds.length} deleted messages in chat $otherUserId: ${deletedIds.join(", ")}');
+              updatedMessages = updatedMessages
+                  .where((msg) => !deletedIds.contains(msg.messageId))
+                  .toList();
+              changed = true;
+          }
+
+          // Apply additions if any found
+          if (trulyNewMessages.isNotEmpty) {
+              log('[MessageProvider] Applying ${trulyNewMessages.length} new messages to chat $otherUserId.');
+              // Prepend new messages (since ListView is reversed and newMessages were fetched ASC)
+              updatedMessages.insertAll(0, trulyNewMessages);
+              changed = true;
+
+              // Update the latest known timestamp only if new messages were actually added
+              if (latestTimestampInNewBatch != null) {
+                   // Make sure the timestamp only moves forward
+                   if (_latestMessageTimestampPerChat[otherUserId] == null || 
+                       latestTimestampInNewBatch!.isAfter(_latestMessageTimestampPerChat[otherUserId]!)) {
+                       _latestMessageTimestampPerChat[otherUserId] = latestTimestampInNewBatch;
+                       log('[MessageProvider] Updated latest timestamp for chat $otherUserId: ${_latestMessageTimestampPerChat[otherUserId]}');
+                   }
+              }
+          }
+
+          // --- Update state and notify if changes occurred ---
+          if (changed) {
+              _chatMessages[otherUserId] = updatedMessages;
+              notifyListeners();
+              log('[MessageProvider] Notified listeners for chat $otherUserId due to changes.');
+          }
+          // else { log('[MessageProvider] No changes detected for chat $otherUserId.'); }
+
+      } on PostgrestException catch (e) {
+          // Log errors but maybe don't set global error state for background polling?
+          log('[MessageProvider] PostgrestException polling chat messages $otherUserId: ${e.message}', error: e);
+          // Optionally: Set a temporary polling error flag?
+          // _chatPollingError[otherUserId] = true;
+      } catch (e, stacktrace) {
+          log('[MessageProvider] Generic error polling chat messages $otherUserId: $e', error: e, stackTrace: stacktrace);
+           // Optionally: Set a temporary polling error flag?
+          // _chatPollingError[otherUserId] = true;
+      }
+      // No finally/notifyListeners here, only notify if there were actual updates.
   }
 
   // Method to send a message
@@ -254,6 +374,20 @@ class MessageProvider with ChangeNotifier {
       final bool hasText = text.trim().isNotEmpty;
       final bool hasImage = media?['type'] == 'image';
 
+      // Locally create the message object AFTER successful DB insertion
+      // Use UTC time for consistency, similar to DB
+      final DateTime messageTimestamp = DateTime.now().toUtc();
+      final Message newMessage = Message(
+          messageId: messageId,
+          createdAt: messageTimestamp,
+          fromUserId: currentUserId,
+          toUserId: toUserId,
+          messageText: text.trim(),
+          messageMedia: media,
+          parentMessageId: parentMessageId,
+          // Display names aren't needed for local update
+      );
+
       await _sendMessageNotification(
         recipientUserId: toUserId,
         senderUserId: currentUserId,
@@ -265,9 +399,21 @@ class MessageProvider with ChangeNotifier {
       );
       // -----------------------
 
-      // Trigger refreshes
-      fetchMessagesForChat(toUserId);
+      // --- Update Local State Instead of Full Refresh ---
+      final List<Message> currentMessages = List<Message>.from(_chatMessages[toUserId] ?? []);
+      // Add the new message to the beginning (since list is reversed in UI)
+      currentMessages.insert(0, newMessage);
+      _chatMessages[toUserId] = currentMessages;
+      // Update the latest timestamp
+      _latestMessageTimestampPerChat[toUserId] = messageTimestamp;
+      log('[MessageProvider] Locally added new message $messageId to chat $toUserId and updated timestamp.');
+      // -----------------------------------------------
+
+      // Trigger summary refresh (still needed)
       fetchMessages(forceRefresh: true);
+
+      // Notify listeners about the local change
+      notifyListeners();
 
       return true;
     } on PostgrestException catch (e) {
@@ -432,9 +578,32 @@ class MessageProvider with ChangeNotifier {
 
       log('[MessageProvider] Message $messageId deleted successfully from DB.');
 
-      // Trigger refreshes
-      fetchMessagesForChat(otherUserId); // Refresh the current chat view
-      fetchMessages(forceRefresh: true); // Refresh conversation summaries
+      // --- Update Local State Instead of Full Refresh ---
+      final List<Message> currentMessages = List<Message>.from(_chatMessages[otherUserId] ?? []);
+      final originalLength = currentMessages.length;
+      currentMessages.removeWhere((msg) => msg.messageId == messageId);
+
+      // Update the map regardless of whether the item was found locally
+      _chatMessages[otherUserId] = currentMessages;
+
+      if (currentMessages.length < originalLength) {
+          log('[MessageProvider] Locally removed message $messageId from chat $otherUserId.');
+          // Update latest timestamp logic...
+          if (currentMessages.isEmpty) {
+              _latestMessageTimestampPerChat.remove(otherUserId);
+              log('[MessageProvider] Cleared timestamp for chat $otherUserId as it is now empty.');
+          }
+          // No notifyListeners() here anymore
+      } else {
+          log('[MessageProvider] Message $messageId not found in local list for chat $otherUserId after delete, but updating state anyway.');
+      }
+
+      // Notify listeners AFTER attempting the local removal and updating the map
+      notifyListeners();
+      // -----------------------------------------------
+
+      // Trigger summary refresh (still needed)
+      fetchMessages(forceRefresh: true);
 
       return true;
     } on PostgrestException catch (e) {
