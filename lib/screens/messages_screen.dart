@@ -149,9 +149,24 @@ class _MessagesScreenState extends State<MessagesScreen> {
       itemCount: summaries.length,
       itemBuilder: (context, index) {
         final summary = summaries[index];
-        // Format the time nicely (e.g., relative or just HH:mm)
-        final DateFormat timeFormat = DateFormat('HH:mm'); // Or use timeago package
-        final String formattedTime = timeFormat.format(summary.lastMessageTimestamp.toLocal());
+        
+        // --- Date/Time Formatting Logic ---
+        final DateTime now = DateTime.now();
+        final DateTime today = DateTime(now.year, now.month, now.day);
+        final DateTime yesterday = today.subtract(const Duration(days: 1));
+        final DateTime messageTimeLocal = summary.lastMessageTimestamp.toLocal();
+        final DateTime messageDate = DateTime(messageTimeLocal.year, messageTimeLocal.month, messageTimeLocal.day);
+
+        String formattedTime;
+        if (messageDate == today) {
+          formattedTime = DateFormat('HH:mm').format(messageTimeLocal);
+        } else if (messageDate == yesterday) {
+          formattedTime = 'Yesterday';
+        } else {
+          // Consider locale if needed: DateFormat.yMd(Localizations.localeOf(context).toString())
+          formattedTime = DateFormat('dd/MM/yyyy').format(messageTimeLocal); 
+        }
+        // --- End Formatting Logic ---
 
         // Check if the last message was sent by the current user
         final bool lastMessageIsMine = summary.lastMessageFromUserId == currentUserId;
@@ -181,7 +196,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             trailing: Text(
-              formattedTime,
+              formattedTime, // Use the dynamically formatted time/date string
               style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
             ),
             onTap: () {

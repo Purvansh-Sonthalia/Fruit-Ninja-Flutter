@@ -193,6 +193,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
   Widget build(BuildContext context) {
     final imageCount = widget.imageList.length;
 
+    // --- Restore previous logic --- 
     // Handle cases: 0, 1, or multiple images
     if (imageCount == 0) {
       return const SizedBox.shrink();
@@ -204,7 +205,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
       } else {
         // Error placeholder for the single image
         return Container(
-          height: 150,
+          height: 150, // Keep defined height for placeholder
           color: Colors.black26,
           child: const Center(
             child: Icon(Icons.error_outline, color: Colors.white70, size: 50),
@@ -216,7 +217,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
       Widget pageViewContent;
       if (_isCalculatingSize) {
         // Show placeholder while calculating
-        pageViewContent = const AspectRatio(
+        pageViewContent = AspectRatio(
           aspectRatio: _defaultAspectRatio,
           child: Center(
             child: CircularProgressIndicator(color: Colors.white70),
@@ -234,8 +235,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
                 itemBuilder: (context, pageIndex) {
                   final imageBytes = _getDecodedImageBytes(pageIndex);
                   if (imageBytes != null) {
-                    // Use the single image builder for zoom etc.
-                    return _buildSingleImage(imageBytes);
+                    return _buildSingleImage(imageBytes); // Reuse zoomable single image builder
                   } else {
                     // Placeholder for decoding errors within PageView
                     return Container(
@@ -251,7 +251,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
                   }
                 },
               ),
-              // Page Indicator
+              // Page Indicator (remains the same)
               Positioned(
                 bottom: 8.0,
                 right: 8.0,
@@ -280,6 +280,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
       }
       return pageViewContent; // Return either placeholder or the sized PageView
     }
+    // --- End of restored logic --- 
   }
 }
 // --- End Image Viewer Widget ---
@@ -345,6 +346,40 @@ class _FeedScreenState extends State<FeedScreen> {
   Future<void> _handleRefresh() async {
     await Provider.of<FeedProvider>(context, listen: false)
         .fetchInitialPosts(forceRefresh: true);
+  }
+
+  // Helper function to navigate to comments screen
+  void _navigateToComments(BuildContext context, Post post) {
+    log('[FeedScreen] Comment button pressed for post ${post.id}');
+    try {
+        log('[FeedScreen] Attempting to access providers for comment navigation...');
+        // CommentsProvider might not be strictly needed here unless passing initial data
+        // final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
+        final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+        log('[FeedScreen] Providers accessed successfully.');
+
+        log('[FeedScreen] Navigating to CommentsScreen for post ${post.id}');
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+            builder: (context) => CommentsScreen(postId: post.id),
+            ),
+        ).then((result) {
+            log('[FeedScreen] Returned from CommentsScreen for post ${post.id}. Result: $result');
+            if (result is int) {
+                final newCount = result;
+                log('[FeedScreen] Received valid count: $newCount. Updating FeedProvider.');
+                feedProvider.updateLocalCommentCount(post.id, newCount);
+            } else {
+                log('[FeedScreen] Did not receive a valid count. Result: $result');
+            }
+        });
+    } catch (e, stacktrace) {
+        log('[FeedScreen] ********** ERROR in _navigateToComments ********** ');
+        log(e.toString());
+        log(stacktrace.toString());
+        log('[FeedScreen] *******************************************************');
+    }
   }
 
   @override
@@ -437,6 +472,9 @@ class _FeedScreenState extends State<FeedScreen> {
     // Build the list view
     return ListView.builder(
       controller: _scrollController,
+      // Add physics and cacheExtent for stability
+      physics: const ClampingScrollPhysics(),
+      cacheExtent: 800.0, // Apply cache extent
       padding: const EdgeInsets.only(top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8),
       itemCount: loadedPosts.length + (hasMorePosts || isLoadingMore ? 1 : 0), // Adjust count based on provider state
       itemBuilder: (context, index) {
@@ -480,160 +518,16 @@ class _FeedScreenState extends State<FeedScreen> {
         // Check if the current user liked this post
         final bool isLikedByCurrentUser = likedPostIds.contains(post.id);
 
-        return Card(
+        // Use the new StatefulWidget for the list item
+        return _FeedPostListItem(
           key: ValueKey(post.id),
-          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-          elevation: 0,
-          color: post.reported
-              ? Colors.deepOrange.withOpacity(0.4)
-              : isSelfPost
-                  ? Colors.yellow.withOpacity(0.3)
-                  : Colors.green.shade900.withOpacity(0.4),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      // Use displayName, fallback to YOU or ANONYMOUS
-                      isSelfPost ? 'YOU' : (post.displayName ?? 'ANONYMOUS'),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.9),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      onPressed: () {
-                        _showPostOptions(context, post, isSelfPost);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 4),
-              if (hasImages)
-                PostImageViewer(
-                  imageList: post.imageList!,
-                  postId: post.id,
-                ),
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      post.textContent,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      dateFormat.format(post.createdAt.toLocal()),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.8),
-                      ),
-                    ),
-                    const SizedBox(height: 12), // Add some spacing
-                    // --- Like and Comment Row ---
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        // Like Button
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(), // Remove default padding
-                          iconSize: 20,
-                          icon: Icon(
-                             // Set icon based on like status
-                            isLikedByCurrentUser ? Icons.favorite : Icons.favorite_border, 
-                            color: isLikedByCurrentUser ? Colors.redAccent : Colors.white70,
-                          ),
-                          onPressed: () {
-                            // Call provider method
-                            feedProvider.toggleLikePost(post.id);
-                          },
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${post.likeCount}', // Display like count
-                          style: const TextStyle(color: Colors.white70, fontSize: 14),
-                        ),
-                        const SizedBox(width: 24), // Spacing
-                        // Comment Button (Placeholder)
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(), // Remove default padding
-                          iconSize: 20,
-                          icon: const Icon(
-                            Icons.comment_outlined,
-                            color: Colors.white70,
-                          ),
-                          onPressed: () {
-                            log('[FeedScreen] Comment button pressed for post ${post.id}'); // Replace print with log
-                            try {
-                              log('[FeedScreen] Attempting to access providers...'); // Replace print with log
-                              final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
-                              final feedProvider = Provider.of<FeedProvider>(context, listen: false);
-                              final initialCommentCount = post.commentCount; // Store initial count
-                              log('[FeedScreen] Providers accessed successfully.'); // Replace print with log
-
-                              log('[FeedScreen] Navigating to CommentsScreen for post ${post.id}'); // Replace print with log
-                              // Navigate and wait for result (when CommentsScreen pops)
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => CommentsScreen(postId: post.id),
-                                ),
-                              ).then((result) {
-                                log('[FeedScreen] Returned from CommentsScreen for post ${post.id}. Result: $result'); // Replace print with log
-                                // --- After CommentsScreen is closed ---
-                                // Result should be the comment count returned by CommentsScreen
-                                if (result is int) {
-                                  final newCount = result;
-                                  log('[FeedScreen] Received valid count: $newCount. Updating FeedProvider.'); // Replace print with log
-                                  // Call FeedProvider to update the count locally
-                                  feedProvider.updateLocalCommentCount(post.id, newCount);
-                                } else {
-                                  log('[FeedScreen] Did not receive a valid count. Result: $result'); // Replace print with log
-                                  // Optional: Could trigger a refresh here as a fallback
-                                  // feedProvider.refreshPostCommentCount(post.id);
-                                }
-                              });
-                            } catch (e, stacktrace) {
-                                log('[FeedScreen] ********** ERROR in Comment Button onPressed **********'); // Replace print with log
-                                log(e.toString());
-                                log(stacktrace.toString());
-                                log('[FeedScreen] *******************************************************'); // Replace print with log
-                            }
-                          },
-                        ),
-                         const SizedBox(width: 4),
-                        Text(
-                          '${post.commentCount}', // Display comment count
-                          style: const TextStyle(color: Colors.white70, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                    // --- End Like and Comment Row ---
-                  ],
-                ),
-              ),
-            ],
-          ),
+          post: post,
+          isSelfPost: isSelfPost,
+          isLikedByCurrentUser: isLikedByCurrentUser,
+          // Pass callbacks down
+          onToggleLike: (postId) => feedProvider.toggleLikePost(postId),
+          onShowOptions: _showPostOptions,
+          onNavigateToComments: _navigateToComments,
         );
       },
     );
@@ -757,3 +651,157 @@ class _FeedScreenState extends State<FeedScreen> {
   // Logic is now in FeedProvider, UI handles SnackBars via helpers
 
 } // End of _FeedScreenState
+
+// --- New StatefulWidget for Feed Post List Item ---
+class _FeedPostListItem extends StatefulWidget {
+  final Post post;
+  final bool isSelfPost;
+  final bool isLikedByCurrentUser;
+  final Function(String) onToggleLike;
+  final Function(BuildContext, Post, bool) onShowOptions;
+  final Function(BuildContext, Post) onNavigateToComments;
+
+  const _FeedPostListItem({
+    super.key,
+    required this.post,
+    required this.isSelfPost,
+    required this.isLikedByCurrentUser,
+    required this.onToggleLike,
+    required this.onShowOptions,
+    required this.onNavigateToComments,
+  });
+
+  @override
+  State<_FeedPostListItem> createState() => _FeedPostListItemState();
+}
+
+class _FeedPostListItemState extends State<_FeedPostListItem> {
+  @override
+  Widget build(BuildContext context) {
+    final post = widget.post;
+    final bool hasImages = post.imageList != null && post.imageList!.isNotEmpty;
+    final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
+
+    return Card(
+      key: ValueKey(post.id),
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      elevation: 0,
+      color: post.reported
+          ? Colors.deepOrange.withOpacity(0.4)
+          : widget.isSelfPost
+              ? Colors.yellow.withOpacity(0.3)
+              : Colors.green.shade900.withOpacity(0.4),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  // Use displayName, fallback to YOU or ANONYMOUS
+                  widget.isSelfPost ? 'YOU' : (post.displayName ?? 'ANONYMOUS'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.9),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_vert, color: Colors.white),
+                  onPressed: () {
+                    widget.onShowOptions(context, post, widget.isSelfPost);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (hasImages)
+            PostImageViewer(
+              imageList: post.imageList!,
+              postId: post.id,
+            ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  post.textContent,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.white,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  dateFormat.format(post.createdAt.toLocal()),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                ),
+                const SizedBox(height: 12), // Add some spacing
+                // --- Like and Comment Row ---
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    // Like Button
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(), // Remove default padding
+                      iconSize: 20,
+                      icon: Icon(
+                         // Set icon based on like status
+                        widget.isLikedByCurrentUser ? Icons.favorite : Icons.favorite_border, 
+                        color: widget.isLikedByCurrentUser ? Colors.redAccent : Colors.white70,
+                      ),
+                      onPressed: () {
+                        // Call provider method
+                        widget.onToggleLike(post.id);
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${post.likeCount}', // Display like count
+                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                    const SizedBox(width: 24), // Spacing
+                    // Comment Button (Placeholder)
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(), // Remove default padding
+                      iconSize: 20,
+                      icon: const Icon(
+                        Icons.comment_outlined,
+                        color: Colors.white70,
+                      ),
+                      onPressed: () {
+                        widget.onNavigateToComments(context, post);
+                      },
+                    ),
+                     const SizedBox(width: 4),
+                    Text(
+                      '${post.commentCount}', // Display comment count
+                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                  ],
+                ),
+                // --- End Like and Comment Row ---
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+// --- End Feed Post List Item Widget ---

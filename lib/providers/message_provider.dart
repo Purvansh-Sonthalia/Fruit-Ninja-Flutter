@@ -25,6 +25,7 @@ class MessageProvider with ChangeNotifier {
   Map<String, bool> _chatHasError = {};
   Map<String, String> _chatErrorMessage = {};
   Map<String, DateTime?> _latestMessageTimestampPerChat = {}; // Added: Track latest timestamp per chat
+  Map<String, Message?> _fetchedSingleMessages = {}; // Added: Cache for single message lookups
 
   bool _isLoading = false;
   bool _hasError = false;
@@ -134,12 +135,27 @@ class MessageProvider with ChangeNotifier {
         final latestMessage = entry.value;
         final otherUserName = displayNameMap[otherUserId] ?? 'Unknown User';
 
+        // Determine the text to display for the summary
+        String displayText;
+        final bool hasText = latestMessage.messageText != null && latestMessage.messageText!.trim().isNotEmpty;
+        // Basic check for image media - adjust if your media structure is different
+        final bool hasImage = latestMessage.messageMedia?['type'] == 'image'; 
+
+        if (hasImage && !hasText) {
+          displayText = '[Image]'; // Specific text for image-only messages
+        } else if (hasText) {
+          displayText = latestMessage.messageText!; // Use the actual text if available
+        } else {
+          // Fallback for other media types or genuinely empty messages
+          displayText = '[Media Message]'; 
+        }
+
         return ConversationSummary(
           otherUserId: otherUserId,
           otherUserDisplayName: otherUserName,
-          lastMessageText: latestMessage.messageText ?? '[Media Message]', // Placeholder for media
+          lastMessageText: displayText, // Use the determined display text
           lastMessageTimestamp: latestMessage.createdAt,
-          lastMessageFromUserId: latestMessage.fromUserId,
+          lastMessageFromUserId: latestMessage.fromUserId, // Pass the sender ID
         );
       }).toList();
 
@@ -374,20 +390,6 @@ class MessageProvider with ChangeNotifier {
       final bool hasText = text.trim().isNotEmpty;
       final bool hasImage = media?['type'] == 'image';
 
-      // Locally create the message object AFTER successful DB insertion
-      // Use UTC time for consistency, similar to DB
-      final DateTime messageTimestamp = DateTime.now().toUtc();
-      final Message newMessage = Message(
-          messageId: messageId,
-          createdAt: messageTimestamp,
-          fromUserId: currentUserId,
-          toUserId: toUserId,
-          messageText: text.trim(),
-          messageMedia: media,
-          parentMessageId: parentMessageId,
-          // Display names aren't needed for local update
-      );
-
       await _sendMessageNotification(
         recipientUserId: toUserId,
         senderUserId: currentUserId,
@@ -400,19 +402,21 @@ class MessageProvider with ChangeNotifier {
       // -----------------------
 
       // --- Update Local State Instead of Full Refresh ---
-      final List<Message> currentMessages = List<Message>.from(_chatMessages[toUserId] ?? []);
-      // Add the new message to the beginning (since list is reversed in UI)
-      currentMessages.insert(0, newMessage);
-      _chatMessages[toUserId] = currentMessages;
-      // Update the latest timestamp
-      _latestMessageTimestampPerChat[toUserId] = messageTimestamp;
-      log('[MessageProvider] Locally added new message $messageId to chat $toUserId and updated timestamp.');
+      // ---- TEMPORARILY REMOVED LOCAL UPDATE ----
+      // final List<Message> currentMessages = List<Message>.from(_chatMessages[toUserId] ?? []);
+      // // Add the new message to the beginning (since list is reversed in UI)
+      // currentMessages.insert(0, newMessage);
+      // _chatMessages[toUserId] = currentMessages;
+      // // Update the latest timestamp
+      // _latestMessageTimestampPerChat[toUserId] = messageTimestamp;
+      // log('[MessageProvider] Locally added new message $messageId to chat $toUserId and updated timestamp.');
+      // ----------------------------------------
       // -----------------------------------------------
 
       // Trigger summary refresh (still needed)
       fetchMessages(forceRefresh: true);
 
-      // Notify listeners about the local change
+      // Notify listeners about the local change (will trigger UI update, but message won't be there yet)
       notifyListeners();
 
       return true;
@@ -531,7 +535,13 @@ class MessageProvider with ChangeNotifier {
 
   // Method to fetch a single message by ID (e.g., for reply context)
   Future<Message?> fetchSingleMessage(String messageId) async {
-    log('[MessageProvider] Fetching single message: $messageId');
+    // Check cache first
+    if (_fetchedSingleMessages.containsKey(messageId)) {
+      log('[MessageProvider] Returning cached single message: $messageId');
+      return _fetchedSingleMessages[messageId]; // Return cached value (could be null)
+    }
+
+    log('[MessageProvider] Fetching single message from DB: $messageId');
     try {
       final response = await _supabase
           .from('messages')
@@ -542,18 +552,22 @@ class MessageProvider with ChangeNotifier {
 
       if (response == null) {
         log('[MessageProvider] Single message $messageId not found.');
+        _fetchedSingleMessages[messageId] = null; // Cache the null result (not found/error)
         return null;
       }
 
       log('[MessageProvider] Fetched single message successfully.');
-      // We don't need display names for the reply snippet usually
-      return Message.fromJson(response as Map<String, dynamic>);
+      final message = Message.fromJson(response as Map<String, dynamic>);
+      _fetchedSingleMessages[messageId] = message; // Cache the fetched message
+      return message;
 
     } on PostgrestException catch (e) {
       log('[MessageProvider] PostgrestException fetching single message $messageId', error: e);
+      _fetchedSingleMessages[messageId] = null; // Cache the null result (not found/error)
       return null;
     } catch (e, stacktrace) {
       log('[MessageProvider] Generic error fetching single message $messageId', error: e, stackTrace: stacktrace);
+      _fetchedSingleMessages[messageId] = null; // Cache the null result (error)
       return null;
     }
   }
