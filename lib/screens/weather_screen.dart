@@ -42,8 +42,8 @@ class WeatherScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.refresh),
             // Call provider's refresh method on press
-            onPressed:
-                () => context.read<WeatherProvider>().refreshWeatherData(),
+            onPressed: () =>
+                context.read<WeatherProvider>().refreshWeatherData(),
             tooltip: 'Refresh Weather',
           ),
         ],
@@ -63,12 +63,11 @@ class WeatherScreen extends StatelessWidget {
           // Use a Builder or Consumer to access provider state within the Center
           child: Center(
             child: Builder(
-              builder:
-                  (context) => _buildWeatherContent(
-                    context,
-                    weatherProvider,
-                    textShadow,
-                  ),
+              builder: (context) => _buildWeatherContent(
+                context,
+                weatherProvider,
+                textShadow,
+              ),
             ),
           ),
         ),
@@ -101,8 +100,8 @@ class WeatherScreen extends StatelessWidget {
             const SizedBox(height: 20),
             ElevatedButton(
               // Use provider's refresh method
-              onPressed:
-                  () => context.read<WeatherProvider>().refreshWeatherData(),
+              onPressed: () =>
+                  context.read<WeatherProvider>().refreshWeatherData(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 foregroundColor: Colors.white,
@@ -165,47 +164,46 @@ class WeatherScreen extends StatelessWidget {
             Text(
               cityName,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                shadows: textShadow,
-              ),
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    shadows: textShadow,
+                  ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
             Image.network(
               'https://openweathermap.org/img/wn/$iconCode@4x.png',
-              errorBuilder:
-                  (context, error, stackTrace) => const Icon(
-                    Icons.error_outline,
-                    color: Colors.white,
-                    size: 50,
-                  ),
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.error_outline,
+                color: Colors.white,
+                size: 50,
+              ),
               height: 100,
               width: 100,
             ),
             Text(
               capitalizedDescription,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                shadows: textShadow,
-              ),
+                    color: Colors.white,
+                    shadows: textShadow,
+                  ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
             Text(
               '${currentTemp.toStringAsFixed(1)}°C',
               style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                shadows: textShadow,
-              ),
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    shadows: textShadow,
+                  ),
             ),
             Text(
               'Feels like ${feelsLike.toStringAsFixed(1)}°C',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: Colors.white70,
-                shadows: textShadow,
-              ),
+                    color: Colors.white70,
+                    shadows: textShadow,
+                  ),
             ),
             const SizedBox(height: 20),
             Row(

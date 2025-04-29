@@ -27,7 +27,8 @@ class Post {
     this.displayName,
   });
 
-  factory Post.fromJson(Map<String, dynamic> json, {String? fetchedDisplayName}) {
+  factory Post.fromJson(Map<String, dynamic> json,
+      {String? fetchedDisplayName}) {
     // Ensure required fields are present and have correct types
     if (json['post_id'] == null ||
         json['user_id'] == null ||
@@ -48,17 +49,16 @@ class Post {
         // New format: JSON string representing a list
         try {
           final decodedList = jsonDecode(mediaContent) as List<dynamic>;
-          parsedImageList =
-              decodedList.map((item) {
-                if (item is Map<String, dynamic>) {
-                  return item;
-                } else {
-                  log(
-                    'Warning: Invalid item type in media_content list for post ${json['post_id']}: $item',
-                  );
-                  return <String, dynamic>{}; // Handle error: empty map
-                }
-              }).toList();
+          parsedImageList = decodedList.map((item) {
+            if (item is Map<String, dynamic>) {
+              return item;
+            } else {
+              log(
+                'Warning: Invalid item type in media_content list for post ${json['post_id']}: $item',
+              );
+              return <String, dynamic>{}; // Handle error: empty map
+            }
+          }).toList();
         } catch (e) {
           log(
             'Error decoding media_content JSON string for post ${json['post_id']}: $e',
@@ -100,7 +100,7 @@ class Post {
     );
   }
 
-   Uint8List? getDecodedImageBytes(int index) {
+  Uint8List? getDecodedImageBytes(int index) {
     if (imageList != null && index >= 0 && index < imageList!.length) {
       final imageData = imageList![index];
       final base64String = imageData['image_base64'] as String?;

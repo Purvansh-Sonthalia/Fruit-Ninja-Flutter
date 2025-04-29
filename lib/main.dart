@@ -27,8 +27,8 @@ void main() async {
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Initialize FCM Service AFTER Firebase Core
-  await FirebaseMessagingService().initialize();
+  // Initialize FCM Service AFTER Firebase Core - Run in background, do not await
+  FirebaseMessagingService().initialize(); // No await here
 
   // Load environment variables
   await dotenv.load();

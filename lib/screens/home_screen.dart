@@ -16,7 +16,6 @@ import '../main.dart'; // Import routeObserver
 import 'leaderboards_screen.dart'; // Corrected import path
 import 'messages_screen.dart'; // Corrected import for MessagesScreen
 
-
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -28,13 +27,15 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with RouteAware {
   // Preference Keys
   static const String _notificationsKey = 'settings_notifications_enabled';
-  static const String _displayNameKey = 'user_display_name'; // Key for local storage
+  static const String _displayNameKey =
+      'user_display_name'; // Key for local storage
 
   @override
   void initState() {
     super.initState();
     // Ensure build is complete before accessing providers or doing heavy work
-    WidgetsBinding.instance.addPostFrameCallback((_) async { // Make callback async
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Make callback async
       // Early exit if not mounted
       if (!mounted) return;
 
@@ -43,13 +44,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       final weatherProvider = context.read<WeatherProvider>();
       final assetsManager = context.read<AssetsManager>();
 
-      // Check and sync FCM token 
-      _checkAndSyncFcmToken(); 
+      // Check and sync FCM token
+      _checkAndSyncFcmToken();
       // Fetch weather and play music
       weatherProvider.fetchWeatherIfNeeded();
       assetsManager.playBackgroundMusic();
 
-      // --- New Logic: Check and Prompt for Display Name --- 
+      // --- New Logic: Check and Prompt for Display Name ---
       // Moved the check logic to _checkAndPromptForDisplayName
       _checkAndPromptForDisplayName();
       // --- End New Logic ---
@@ -78,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     _checkAndPromptForDisplayName();
     // Optionally, restart music if needed
     if (mounted) {
-      context.read<AssetsManager>().playBackgroundMusic(); 
+      context.read<AssetsManager>().playBackgroundMusic();
     }
   }
 
@@ -100,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         remoteName = remoteName?.trim() ?? ''; // Ensure trimmed and non-null
         // Optional: If remote name exists but local doesn't, save it locally
         if (remoteName.isNotEmpty) {
-          await prefs.setString(_displayNameKey, remoteName); 
+          await prefs.setString(_displayNameKey, remoteName);
         }
       }
 
@@ -108,10 +109,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       if (localName.isEmpty && (remoteName == null || remoteName.isEmpty)) {
         print("User logged in but display name not set. Prompting...");
         // Ensure dialog isn't shown if context is no longer valid
-        if (mounted) { 
+        if (mounted) {
           // Use a short delay to avoid potential build conflicts when called from didPopNext
-          Future.delayed(Duration.zero, () { 
-              if(mounted) _showDisplayNameDialog(context, authService);
+          Future.delayed(Duration.zero, () {
+            if (mounted) _showDisplayNameDialog(context, authService);
           });
         }
       }
@@ -213,7 +214,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                     Consumer<AuthService>(
                       builder: (ctx, authService, _) {
                         if (!authService.isLoggedIn) {
-                          return const SizedBox.shrink(); // Hide if not logged in
+                          return const SizedBox
+                              .shrink(); // Hide if not logged in
                         }
                         return _buildMenuButton(
                           context,
@@ -227,32 +229,29 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
                     // Auth Button (Login/SignUp or Logout)
                     Consumer<AuthService>(
-                      builder:
-                          (ctx, authService, _) => _buildMenuButton(
-                            context,
-                            authService.isLoggedIn
-                                ? 'LOGOUT'
-                                : 'LOGIN / SIGN UP',
-                            Colors.green,
-                            () {
-                              if (authService.isLoggedIn) {
-                                authService.signOut();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Successfully logged out'),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                              } else {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const AuthScreen(),
-                                  ),
-                                );
-                              }
-                            },
-                          ),
+                      builder: (ctx, authService, _) => _buildMenuButton(
+                        context,
+                        authService.isLoggedIn ? 'LOGOUT' : 'LOGIN / SIGN UP',
+                        Colors.green,
+                        () {
+                          if (authService.isLoggedIn) {
+                            authService.signOut();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Successfully logged out'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const AuthScreen(),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                     ),
                     const SizedBox(height: 20),
 
@@ -313,7 +312,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                   tooltip: 'Weather',
                 ),
               ),
-               // Feed Icon Button (Next to Weather)
+              // Feed Icon Button (Next to Weather)
               Consumer<AuthService>(
                 builder: (context, authService, _) {
                   if (authService.isLoggedIn == false) {
@@ -343,15 +342,17 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                   );
                 },
               ),
-               // Leaderboard Icon Button (Moved to top-right)
+              // Leaderboard Icon Button (Moved to top-right)
               Consumer<AuthService>(
                 builder: (context, authService, _) {
                   if (authService.isLoggedIn == false) {
                     return const SizedBox.shrink(); // Hide if not logged in
                   }
                   return Positioned(
-                    top: edgePadding,    // Align with other top icons
-                    right: edgePadding + (iconSize + edgePadding) * 2, // Adjusted position with increased gap
+                    top: edgePadding, // Align with other top icons
+                    right: edgePadding +
+                        (iconSize + edgePadding) *
+                            2, // Adjusted position with increased gap
                     child: IconButton(
                       icon: Icon(
                         Icons.leaderboard, // Use the leaderboard icon
@@ -362,7 +363,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const LeaderboardsScreen(), // Navigate to LeaderboardScreen
+                            builder: (context) =>
+                                const LeaderboardsScreen(), // Navigate to LeaderboardScreen
                           ),
                         );
                       },
@@ -371,26 +373,30 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                   );
                 },
               ),
-               // Message Icon Button (New, next to Leaderboard)
+              // Message Icon Button (New, next to Leaderboard)
               Consumer<AuthService>(
                 builder: (context, authService, _) {
                   if (authService.isLoggedIn == false) {
                     return const SizedBox.shrink(); // Hide if not logged in
                   }
                   return Positioned(
-                    top: edgePadding,    // Align with other top icons
-                    right: edgePadding + (iconSize + edgePadding) * 3, // Position left of Leaderboard icon
+                    top: edgePadding, // Align with other top icons
+                    right: edgePadding +
+                        (iconSize + edgePadding) *
+                            3, // Position left of Leaderboard icon
                     child: IconButton(
                       icon: Icon(
                         Icons.message, // Use the message icon
-                        color: Colors.blue[800], // Choose a suitable dark blue color
+                        color: Colors
+                            .blue[800], // Choose a suitable dark blue color
                         size: iconSize, // Use responsive size
                       ),
                       onPressed: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const MessagesScreen(), // Navigate to MessagesScreen
+                            builder: (context) =>
+                                const MessagesScreen(), // Navigate to MessagesScreen
                           ),
                         );
                       },
@@ -441,9 +447,11 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   // New Dialog for Setting Display Name
-  Future<void> _showDisplayNameDialog(BuildContext context, AuthService authService) async {
+  Future<void> _showDisplayNameDialog(
+      BuildContext context, AuthService authService) async {
     final prefs = await SharedPreferences.getInstance();
-    final currentName = prefs.getString(_displayNameKey) ?? ''; // Load from local storage
+    final currentName =
+        prefs.getString(_displayNameKey) ?? ''; // Load from local storage
     final controller = TextEditingController(text: currentName);
     final formKey = GlobalKey<FormState>();
     bool isSaving = false; // To prevent multiple saves
@@ -453,7 +461,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     showDialog(
       context: context,
       barrierDismissible: !isSaving, // Prevent dismissal while saving
-      builder: (context) => StatefulBuilder( // Use StatefulBuilder for loading indicator
+      builder: (context) => StatefulBuilder(
+        // Use StatefulBuilder for loading indicator
         builder: (context, setDialogState) {
           return AlertDialog(
             title: const Text('Set Display Name'),
@@ -468,8 +477,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                   if (value == null || value.trim().isEmpty) {
                     return 'Display name cannot be empty.';
                   }
-                  if (value.length > 20) { // Example length limit
-                      return 'Name cannot exceed 20 characters.';
+                  if (value.length > 20) {
+                    // Example length limit
+                    return 'Name cannot exceed 20 characters.';
                   }
                   // Add more validation if needed (e.g., allowed characters)
                   return null;
@@ -492,29 +502,34 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                           bool success = false;
 
                           try {
-                            success = await authService.updateDisplayName(newName);
+                            success =
+                                await authService.updateDisplayName(newName);
                             if (!success) {
                               // Check if it failed because the name was taken
                               // AuthService.updateDisplayName returns false if taken
-                              errorMessage = 'Display name \'$newName\' is already taken.';
+                              errorMessage =
+                                  'Display name \'$newName\' is already taken.';
                             } else {
                               // Save to local storage on success
                               await prefs.setString(_displayNameKey, newName);
                             }
                           } catch (e) {
                             print("Caught error in dialog: $e");
-                            errorMessage = 'An error occurred. Please try again.';
+                            errorMessage =
+                                'An error occurred. Please try again.';
                           } finally {
                             setDialogState(() => isSaving = false);
                           }
 
-                          if (!mounted) return; // Check again after async operation
+                          if (!mounted)
+                            return; // Check again after async operation
 
                           if (success) {
                             Navigator.pop(context); // Close dialog on success
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Display name saved as \'$newName\'!'),
+                                content:
+                                    Text('Display name saved as \'$newName\'!'),
                                 backgroundColor: Colors.green,
                               ),
                             );
@@ -530,7 +545,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                         }
                       },
                 child: isSaving
-                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))) 
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white)))
                     : const Text('Save'),
               ),
             ],
@@ -543,51 +564,50 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   void _showCreditsDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text(
-              'Credits',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            content: const SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Fruit Ninja Flutter',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'A clone of the popular Fruit Ninja game, implemented in Flutter.',
-                  ),
-                  SizedBox(height: 20),
-                  Text(
-                    'Developed by:',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text('Purvansh Sonthalia'),
-                  SizedBox(height: 20),
-                  Text(
-                    'Original Game:',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text('Fruit Ninja by Halfbrick Studios'),
-                  SizedBox(height: 20),
-                  Text(
-                    'This is a fan-made clone for educational purposes only.',
-                  ),
-                ],
+      builder: (context) => AlertDialog(
+        title: const Text(
+          'Credits',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Fruit Ninja Flutter',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
+              SizedBox(height: 10),
+              Text(
+                'A clone of the popular Fruit Ninja game, implemented in Flutter.',
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Developed by:',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text('Purvansh Sonthalia'),
+              SizedBox(height: 20),
+              Text(
+                'Original Game:',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text('Fruit Ninja by Halfbrick Studios'),
+              SizedBox(height: 20),
+              Text(
+                'This is a fan-made clone for educational purposes only.',
               ),
             ],
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 }

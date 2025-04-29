@@ -136,33 +136,31 @@ class _PostImageViewerState extends State<PostImageViewer> {
         // Show the zoomed image in a Dialog
         showDialog(
           context: context,
-          builder:
-              (_) => Dialog(
-                backgroundColor: Colors.transparent,
-                insetPadding: const EdgeInsets.all(10),
-                child: GestureDetector(
-                  // Tap again to close the dialog
-                  onTap: () => Navigator.of(context).pop(),
-                  child: InteractiveViewer(
-                    panEnabled: true,
-                    boundaryMargin: const EdgeInsets.all(20),
-                    minScale: 0.5,
-                    maxScale: 4.0,
-                    child: Center(
-                      child: Image.memory(
-                        imageBytes, // Use the same image bytes
-                        fit: BoxFit.contain,
-                        errorBuilder:
-                            (ctx, err, st) => const Icon(
-                              Icons.broken_image,
-                              size: 100,
-                              color: Colors.white70,
-                            ),
-                      ),
+          builder: (_) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(10),
+            child: GestureDetector(
+              // Tap again to close the dialog
+              onTap: () => Navigator.of(context).pop(),
+              child: InteractiveViewer(
+                panEnabled: true,
+                boundaryMargin: const EdgeInsets.all(20),
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(
+                  child: Image.memory(
+                    imageBytes, // Use the same image bytes
+                    fit: BoxFit.contain,
+                    errorBuilder: (ctx, err, st) => const Icon(
+                      Icons.broken_image,
+                      size: 100,
+                      color: Colors.white70,
                     ),
                   ),
                 ),
               ),
+            ),
+          ),
         );
       },
       child: Image.memory(
@@ -193,7 +191,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
   Widget build(BuildContext context) {
     final imageCount = widget.imageList.length;
 
-    // --- Restore previous logic --- 
+    // --- Restore previous logic ---
     // Handle cases: 0, 1, or multiple images
     if (imageCount == 0) {
       return const SizedBox.shrink();
@@ -235,7 +233,8 @@ class _PostImageViewerState extends State<PostImageViewer> {
                 itemBuilder: (context, pageIndex) {
                   final imageBytes = _getDecodedImageBytes(pageIndex);
                   if (imageBytes != null) {
-                    return _buildSingleImage(imageBytes); // Reuse zoomable single image builder
+                    return _buildSingleImage(
+                        imageBytes); // Reuse zoomable single image builder
                   } else {
                     // Placeholder for decoding errors within PageView
                     return Container(
@@ -280,7 +279,7 @@ class _PostImageViewerState extends State<PostImageViewer> {
       }
       return pageViewContent; // Return either placeholder or the sized PageView
     }
-    // --- End of restored logic --- 
+    // --- End of restored logic ---
   }
 }
 // --- End Image Viewer Widget ---
@@ -295,13 +294,13 @@ class FeedScreen extends StatefulWidget {
 class _FeedScreenState extends State<FeedScreen> {
   // --- Remove State Variables ---
   // final List<Post> _loadedPosts = [];
-  // final _supabase = Supabase.instance.client; 
+  // final _supabase = Supabase.instance.client;
   // bool _isLoading = false;
   // bool _isLoadingMore = false;
   // bool _hasMorePosts = true;
   // int _currentOffset = 0;
   // static const int _fetchLimit = 10;
-  
+
   // --- Keep ScrollController ---
   final ScrollController _scrollController = ScrollController();
 
@@ -311,7 +310,7 @@ class _FeedScreenState extends State<FeedScreen> {
     _scrollController.addListener(_onScroll);
     // Fetch initial posts when the screen loads for the first time
     // Use addPostFrameCallback to ensure context is available
-    WidgetsBinding.instance.addPostFrameCallback((_) { 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       // Access provider without listening here, just triggering the fetch
       final feedProvider = Provider.of<FeedProvider>(context, listen: false);
       feedProvider.fetchInitialPosts();
@@ -352,33 +351,33 @@ class _FeedScreenState extends State<FeedScreen> {
   void _navigateToComments(BuildContext context, Post post) {
     log('[FeedScreen] Comment button pressed for post ${post.id}');
     try {
-        log('[FeedScreen] Attempting to access providers for comment navigation...');
-        // CommentsProvider might not be strictly needed here unless passing initial data
-        // final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
-        final feedProvider = Provider.of<FeedProvider>(context, listen: false);
-        log('[FeedScreen] Providers accessed successfully.');
+      log('[FeedScreen] Attempting to access providers for comment navigation...');
+      // CommentsProvider might not be strictly needed here unless passing initial data
+      // final commentsProvider = Provider.of<CommentsProvider>(context, listen: false);
+      final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+      log('[FeedScreen] Providers accessed successfully.');
 
-        log('[FeedScreen] Navigating to CommentsScreen for post ${post.id}');
-        Navigator.push(
-            context,
-            MaterialPageRoute(
-            builder: (context) => CommentsScreen(postId: post.id),
-            ),
-        ).then((result) {
-            log('[FeedScreen] Returned from CommentsScreen for post ${post.id}. Result: $result');
-            if (result is int) {
-                final newCount = result;
-                log('[FeedScreen] Received valid count: $newCount. Updating FeedProvider.');
-                feedProvider.updateLocalCommentCount(post.id, newCount);
-            } else {
-                log('[FeedScreen] Did not receive a valid count. Result: $result');
-            }
-        });
+      log('[FeedScreen] Navigating to CommentsScreen for post ${post.id}');
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CommentsScreen(postId: post.id),
+        ),
+      ).then((result) {
+        log('[FeedScreen] Returned from CommentsScreen for post ${post.id}. Result: $result');
+        if (result is int) {
+          final newCount = result;
+          log('[FeedScreen] Received valid count: $newCount. Updating FeedProvider.');
+          feedProvider.updateLocalCommentCount(post.id, newCount);
+        } else {
+          log('[FeedScreen] Did not receive a valid count. Result: $result');
+        }
+      });
     } catch (e, stacktrace) {
-        log('[FeedScreen] ********** ERROR in _navigateToComments ********** ');
-        log(e.toString());
-        log(stacktrace.toString());
-        log('[FeedScreen] *******************************************************');
+      log('[FeedScreen] ********** ERROR in _navigateToComments ********** ');
+      log(e.toString());
+      log(stacktrace.toString());
+      log('[FeedScreen] *******************************************************');
     }
   }
 
@@ -412,7 +411,8 @@ class _FeedScreenState extends State<FeedScreen> {
         ),
         child: RefreshIndicator(
           onRefresh: _handleRefresh,
-          child: _buildFeedContent(loadedPosts, isLoading, isLoadingMore, hasMorePosts), // Pass data
+          child: _buildFeedContent(
+              loadedPosts, isLoading, isLoadingMore, hasMorePosts), // Pass data
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
@@ -423,7 +423,7 @@ class _FeedScreenState extends State<FeedScreen> {
             MaterialPageRoute(builder: (context) => const CreatePostScreen()),
           );
           if (result == true && mounted) {
-             // Await the refresh triggered via provider
+            // Await the refresh triggered via provider
             await _handleRefresh();
           }
         },
@@ -436,21 +436,24 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   // Helper widget to build the main feed content based on state from provider
-  Widget _buildFeedContent(
-      List<Post> loadedPosts, bool isLoading, bool isLoadingMore, bool hasMorePosts) { 
+  Widget _buildFeedContent(List<Post> loadedPosts, bool isLoading,
+      bool isLoadingMore, bool hasMorePosts) {
     // Get liked post IDs from provider (listen: true to rebuild on change)
-    final likedPostIds = context.watch<FeedProvider>().likedPostIds; 
+    final likedPostIds = context.watch<FeedProvider>().likedPostIds;
 
     // Show loading indicator during initial fetch
-    if (isLoading && loadedPosts.isEmpty) { // Check if loading AND list is empty
+    if (isLoading && loadedPosts.isEmpty) {
+      // Check if loading AND list is empty
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
 
     // Show message if no posts after initial load
-    if (loadedPosts.isEmpty && !isLoading) { // Check list empty AND not loading
-      return ListView( // Wrap in ListView to enable pull-to-refresh even when empty
+    if (loadedPosts.isEmpty && !isLoading) {
+      // Check list empty AND not loading
+      return ListView(
+        // Wrap in ListView to enable pull-to-refresh even when empty
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           SizedBox(height: MediaQuery.of(context).size.height * 0.3),
@@ -475,8 +478,12 @@ class _FeedScreenState extends State<FeedScreen> {
       // Add physics and cacheExtent for stability
       physics: const ClampingScrollPhysics(),
       cacheExtent: 800.0, // Apply cache extent
-      padding: const EdgeInsets.only(top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8),
-      itemCount: loadedPosts.length + (hasMorePosts || isLoadingMore ? 1 : 0), // Adjust count based on provider state
+      padding: const EdgeInsets.only(
+          top: kToolbarHeight + 8, bottom: 8, left: 8, right: 8),
+      itemCount: loadedPosts.length +
+          (hasMorePosts || isLoadingMore
+              ? 1
+              : 0), // Adjust count based on provider state
       itemBuilder: (context, index) {
         final isLastItem = index == loadedPosts.length;
 
@@ -491,30 +498,34 @@ class _FeedScreenState extends State<FeedScreen> {
                 : const SizedBox.shrink();
           } else {
             // Only show end of feed if not loading initially
-            return !isLoading ? const Padding( 
-              padding: EdgeInsets.symmetric(vertical: 20.0),
-              child: Center(
-                child: Text(
-                  '~ End of Feed ~',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ) : const SizedBox.shrink();
+            return !isLoading
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20.0),
+                    child: Center(
+                      child: Text(
+                        '~ End of Feed ~',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink();
           }
         }
 
         final post = loadedPosts[index];
-        final bool hasImages = post.imageList != null && post.imageList!.isNotEmpty;
+        final bool hasImages =
+            post.imageList != null && post.imageList!.isNotEmpty;
         final authService = Provider.of<AuthService>(context, listen: false);
         final currentUserId = authService.userId;
-        final bool isSelfPost = currentUserId != null && post.userId == currentUserId;
+        final bool isSelfPost =
+            currentUserId != null && post.userId == currentUserId;
         final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
         // Access FeedProvider for actions (listen: false for actions)
-        final feedProvider = Provider.of<FeedProvider>(context, listen: false); 
+        final feedProvider = Provider.of<FeedProvider>(context, listen: false);
         // Check if the current user liked this post
         final bool isLikedByCurrentUser = likedPostIds.contains(post.id);
 
@@ -536,7 +547,8 @@ class _FeedScreenState extends State<FeedScreen> {
   // --- Update action handlers to use provider and show SnackBars ---
 
   void _showPostOptions(BuildContext context, Post post, bool isSelfPost) {
-    final feedProvider = Provider.of<FeedProvider>(context, listen: false); // Get provider instance
+    final feedProvider = Provider.of<FeedProvider>(context,
+        listen: false); // Get provider instance
 
     showModalBottomSheet(
       context: context,
@@ -555,18 +567,22 @@ class _FeedScreenState extends State<FeedScreen> {
               if (isSelfPost)
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text('Delete Post', style: TextStyle(color: Colors.red)),
+                  title: const Text('Delete Post',
+                      style: TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(context); // Close bottom sheet
-                    _confirmAndDeletePost(context, feedProvider, post.id); // Call new helper
+                    _confirmAndDeletePost(
+                        context, feedProvider, post.id); // Call new helper
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.flag_outlined),
                 title: const Text('Report Post'),
-                onTap: () async { // Make async
+                onTap: () async {
+                  // Make async
                   Navigator.pop(context); // Close bottom sheet
-                  _handleReportPost(context, feedProvider, post.id); // Call new helper
+                  _handleReportPost(
+                      context, feedProvider, post.id); // Call new helper
                 },
               ),
               ListTile(
@@ -582,50 +598,57 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   // Helper for delete confirmation and action
-  void _confirmAndDeletePost(BuildContext buildContext, FeedProvider feedProvider, String postId) {
-     showDialog(
-        context: buildContext, // Use the context passed to the options sheet
-        builder: (BuildContext dialogContext) {
-          return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-              icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 40),
-              title: const Text('Delete Post', textAlign: TextAlign.center),
-              content: const Text(
-                  'Are you sure you want to delete this post? This action cannot be undone.',
-                  textAlign: TextAlign.center,
-              ),
-              actionsAlignment: MainAxisAlignment.center,
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  onPressed: () async { // Make async
-                    Navigator.of(dialogContext).pop(); // Close the dialog
-                    // Call provider delete method
-                    final success = await feedProvider.deletePost(postId);
-                    // Show SnackBar based on result - check if context is still valid
-                    if (mounted) {
-                        ScaffoldMessenger.of(buildContext).showSnackBar(
-                          SnackBar(
-                            content: Text(success ? 'Post deleted successfully.' : 'Error deleting post.'),
-                            backgroundColor: success ? Colors.green : Colors.red,
-                          ),
-                        );
-                    }
-                  },
-                  child: const Text('Delete'),
-                ),
-              ],
-          );
-        },
-     );
+  void _confirmAndDeletePost(
+      BuildContext buildContext, FeedProvider feedProvider, String postId) {
+    showDialog(
+      context: buildContext, // Use the context passed to the options sheet
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
+          icon: const Icon(Icons.warning_amber_rounded,
+              color: Colors.red, size: 40),
+          title: const Text('Delete Post', textAlign: TextAlign.center),
+          content: const Text(
+            'Are you sure you want to delete this post? This action cannot be undone.',
+            textAlign: TextAlign.center,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () async {
+                // Make async
+                Navigator.of(dialogContext).pop(); // Close the dialog
+                // Call provider delete method
+                final success = await feedProvider.deletePost(postId);
+                // Show SnackBar based on result - check if context is still valid
+                if (mounted) {
+                  ScaffoldMessenger.of(buildContext).showSnackBar(
+                    SnackBar(
+                      content: Text(success
+                          ? 'Post deleted successfully.'
+                          : 'Error deleting post.'),
+                      backgroundColor: success ? Colors.green : Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   // Helper for reporting post and showing Snackbar
-  Future<void> _handleReportPost(BuildContext buildContext, FeedProvider feedProvider, String postId) async {
+  Future<void> _handleReportPost(BuildContext buildContext,
+      FeedProvider feedProvider, String postId) async {
     if (mounted) {
       ScaffoldMessenger.of(buildContext).showSnackBar(
         const SnackBar(
@@ -637,19 +660,20 @@ class _FeedScreenState extends State<FeedScreen> {
     }
     final success = await feedProvider.reportPost(postId);
     // Show SnackBar based on result - check if context is still valid
-     if (mounted) {
-        ScaffoldMessenger.of(buildContext).showSnackBar(
-          SnackBar(
-            content: Text(success ? 'Post reported successfully. Thank you.' : 'Error submitting report.'),
-            backgroundColor: success ? Colors.green : Colors.red,
-          ),
-        );
-     }
+    if (mounted) {
+      ScaffoldMessenger.of(buildContext).showSnackBar(
+        SnackBar(
+          content: Text(success
+              ? 'Post reported successfully. Thank you.'
+              : 'Error submitting report.'),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    }
   }
 
   // --- Remove _reportPost and _deletePost methods ---
   // Logic is now in FeedProvider, UI handles SnackBars via helpers
-
 } // End of _FeedScreenState
 
 // --- New StatefulWidget for Feed Post List Item ---
@@ -757,12 +781,17 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
                     // Like Button
                     IconButton(
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(), // Remove default padding
+                      constraints:
+                          const BoxConstraints(), // Remove default padding
                       iconSize: 20,
                       icon: Icon(
-                         // Set icon based on like status
-                        widget.isLikedByCurrentUser ? Icons.favorite : Icons.favorite_border, 
-                        color: widget.isLikedByCurrentUser ? Colors.redAccent : Colors.white70,
+                        // Set icon based on like status
+                        widget.isLikedByCurrentUser
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: widget.isLikedByCurrentUser
+                            ? Colors.redAccent
+                            : Colors.white70,
                       ),
                       onPressed: () {
                         // Call provider method
@@ -772,13 +801,15 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
                     const SizedBox(width: 4),
                     Text(
                       '${post.likeCount}', // Display like count
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                     const SizedBox(width: 24), // Spacing
                     // Comment Button (Placeholder)
                     IconButton(
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(), // Remove default padding
+                      constraints:
+                          const BoxConstraints(), // Remove default padding
                       iconSize: 20,
                       icon: const Icon(
                         Icons.comment_outlined,
@@ -788,10 +819,11 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
                         widget.onNavigateToComments(context, post);
                       },
                     ),
-                     const SizedBox(width: 4),
+                    const SizedBox(width: 4),
                     Text(
                       '${post.commentCount}', // Display comment count
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ],
                 ),

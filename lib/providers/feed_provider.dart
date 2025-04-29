@@ -14,17 +14,25 @@ import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variable
 
 // --- Add AuthService import ---
 import '../services/auth_service.dart';
+// --- Add DatabaseHelper import ---
+import '../services/database_helper.dart';
 
 class FeedProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   // --- Add AuthService instance ---
-  final AuthService _authService = AuthService(); // Assuming default constructor or singleton
+  final AuthService _authService =
+      AuthService(); // Assuming default constructor or singleton
+  // --- Add DatabaseHelper instance ---
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
   final List<Post> _loadedPosts = [];
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _hasMorePosts = true;
-  int _currentOffset = 0;
+  int _currentOffset = 0; // Tracks network offset
   static const int _fetchLimit = 10;
+  bool _isOffline = false; // Track connectivity status
+  String _errorMessage = ''; // Store error messages
 
   // --- State for liked posts ---
   Set<String> _likedPostIds = {};
@@ -34,150 +42,230 @@ class FeedProvider with ChangeNotifier {
   final Map<String, String?> _displayNameCache = {};
 
   // --- Getters for UI ---
-  List<Post> get posts => List.unmodifiable(_loadedPosts); // Return unmodifiable list
+  List<Post> get posts =>
+      List.unmodifiable(_loadedPosts); // Return unmodifiable list
   bool get isLoading => _isLoading;
   bool get isLoadingMore => _isLoadingMore;
   bool get hasMorePosts => _hasMorePosts;
   // Getter for liked post IDs
   Set<String> get likedPostIds => _likedPostIds;
+  bool get isOffline => _isOffline; // Getter for offline status
+  String get errorMessage => _errorMessage; // Getter for error message
 
   // --- Data Fetching Logic ---
 
-  // Helper to fetch IDs of posts liked by the current user
-  // Modified to return the set of IDs instead of updating state directly
-  Future<Set<String>> _fetchUserLikes() async { // <-- Return Set<String>
+  // Helper to fetch IDs of posts liked by the current user from Supabase
+  Future<Set<String>> _fetchUserLikesFromNetwork() async {
     final userId = _authService.userId;
-    // Loading state (_isLoadingLikes) is now managed by the caller (fetchInitialPosts)
     if (userId == null) {
-      log('Cannot fetch likes: User not logged in.');
-      return {}; // Return empty set if no user
-    }
-
-    log('Fetching user likes for user: $userId');
-    // No need for _isLoadingLikes or notifyListeners here
-
-    Set<String> fetchedIds = {};
-    try {
-      final response = await _supabase
-          .from('likes')
-          .select('post_id') // Only fetch the post_id
-          .eq('user_id', userId);
-
-      final List<dynamic> data = response ?? [];
-      // Create a set of post_id strings
-      fetchedIds = data.map((item) => item['post_id'] as String).toSet();
-      log('Fetched ${fetchedIds.length} liked post IDs.');
-    } catch (e) {
-      log('Error fetching user likes: $e');
-      // Return empty set on error, let caller decide how to handle
+      log('[FeedProvider] Cannot fetch likes from network: User not logged in.');
       return {};
     }
-    // Return the fetched set, state update happens in the caller
-    return fetchedIds;
+    log('[FeedProvider] Fetching user likes from network for user: $userId');
+    try {
+      final response =
+          await _supabase.from('likes').select('post_id').eq('user_id', userId);
+
+      final List<dynamic> data = response ?? [];
+      final fetchedIds = data.map((item) => item['post_id'] as String).toSet();
+      log('[FeedProvider] Fetched ${fetchedIds.length} liked post IDs from network.');
+      return fetchedIds;
+    } catch (e) {
+      log('[FeedProvider] Error fetching user likes from network: $e');
+      // Don't throw, return empty set and let caller handle potential network issues
+      return {};
+    }
   }
 
+  // Updated fetchInitialPosts to include caching
   Future<void> fetchInitialPosts({bool forceRefresh = false}) async {
-    // 1. Early exit if already loading or not forcing refresh on existing data
-    if (_isLoading || (_loadedPosts.isNotEmpty && !forceRefresh)) return;
+    // 1. Check loading state
+    if (_isLoading) return; // Prevent concurrent initial loads
 
     _isLoading = true;
-    notifyListeners(); // Notify loading started (e.g., for pull-to-refresh indicator)
+    _isOffline = false; // Assume online initially
+    _errorMessage = '';
 
-    // Store old state in case of failure during forced refresh
-    List<Post> oldPosts = forceRefresh ? List.from(_loadedPosts) : [];
-    Set<String> oldLikedPostIds = forceRefresh ? Set.from(_likedPostIds) : {};
-    int oldOffset = _currentOffset;
-    bool oldHasMore = _hasMorePosts;
+    // 2. Handle Refresh Scenario
+    if (forceRefresh) {
+      _loadedPosts.clear();
+      _currentOffset = 0;
+      _hasMorePosts = true; // Assume more posts until network check fails
+      log('[FeedProvider] Force refresh initiated, clearing local posts.');
+    } else {
+      // 3. Load from Cache (if not forcing refresh)
+      // Try loading from cache first ONLY if not forcing a refresh and list is empty
+      if (_loadedPosts.isEmpty) {
+        await _loadPostsFromCache(isInitialLoad: true);
+      }
+    }
 
-    List<Post> fetchedPosts = [];
-    Set<String> fetchedLikedIds = {}; // Use current likes as default
+    // 4. Notify UI about loading state change (and potential cache load)
+    notifyListeners();
+
+    // 5. Network Fetch Attempt
+    List<Post> fetchedNetworkPosts = [];
+    Set<String> fetchedNetworkLikedIds = {};
+    bool networkFetchSuccess = false;
 
     try {
-      // --- Fetching ---
-      // Determine if likes need fetching
-      bool shouldFetchLikes = forceRefresh || (_likedPostIds.isEmpty && _authService.userId != null);
+      log('[FeedProvider] Attempting network fetch for initial posts...');
+      // Determine if likes need fetching from network
+      bool shouldFetchLikes = forceRefresh ||
+          (_likedPostIds.isEmpty && _authService.userId != null);
 
-      // Create futures
       List<Future> futures = [];
-      futures.add(_fetchPosts(limit: _fetchLimit, offset: 0)); // Always fetch posts
+      // Use _fetchPostsFromNetwork
+      futures.add(_fetchPostsFromNetwork(limit: _fetchLimit, offset: 0));
       if (shouldFetchLikes) {
-        futures.add(_fetchUserLikes()); // Add likes fetch if needed
+        // Use _fetchUserLikesFromNetwork
+        futures.add(_fetchUserLikesFromNetwork());
       }
 
-      // Await results
       final results = await Future.wait(futures);
 
       // Process results
-      fetchedPosts = results[0] as List<Post>;
+      fetchedNetworkPosts = results[0] as List<Post>;
       if (shouldFetchLikes) {
-        // Likes were fetched (second future)
-        fetchedLikedIds = results[1] as Set<String>;
-      } else if (!forceRefresh) {
-         // If not forcing refresh and not fetching likes, keep existing likes
-         fetchedLikedIds = Set.from(_likedPostIds);
+        fetchedNetworkLikedIds = results[1] as Set<String>;
+      } else {
+        // Keep existing likes if not forcing refresh and not fetching likes
+        fetchedNetworkLikedIds = Set.from(_likedPostIds);
       }
-      // If forcing refresh but not fetching likes (e.g., logged out user), fetchedLikedIds remains empty {}
 
-      // --- State Update (only on success) ---
-      log('Successfully fetched initial data. Updating state.');
-      _loadedPosts.clear(); // Clear existing posts *after* successful fetch
-      _loadedPosts.addAll(fetchedPosts);
-      _currentOffset = fetchedPosts.length;
-      _hasMorePosts = fetchedPosts.length == _fetchLimit;
-      _likedPostIds = fetchedLikedIds; // Update with fetched or existing likes
+      networkFetchSuccess = true;
+      log('[FeedProvider] Successfully fetched initial data from network (${fetchedNetworkPosts.length} posts).');
 
-      // --- Fetch Profiles for the fetched posts --- 
-      // This now happens within _fetchPosts, so no separate call needed here.
-      // -------------------------------------------
+      // --- Update State & Cache (only on network success) ---
+      _loadedPosts.clear(); // Clear existing posts (cache or old data)
+      _loadedPosts.addAll(fetchedNetworkPosts);
+      _currentOffset = fetchedNetworkPosts.length; // Reset network offset
+      _hasMorePosts = fetchedNetworkPosts.length == _fetchLimit;
+      _likedPostIds = fetchedNetworkLikedIds; // Update likes from network
 
+      // Cache the newly fetched posts
+      await _dbHelper.batchUpsertPosts(fetchedNetworkPosts);
+      log('[FeedProvider] Cached ${fetchedNetworkPosts.length} initial posts.');
     } catch (e) {
-      log('Error during initial fetch/likes fetch in Provider: $e');
-      _hasMorePosts = false; // Assume no more posts on error
+      log('[FeedProvider] Error during initial network fetch: $e');
+      _errorMessage =
+          'Failed to fetch latest posts. Displaying cached data if available.'; // Set error message
+      _isOffline = true; // Indicate potential offline state
+      _hasMorePosts = false; // Can't assume more posts if network failed
 
-      // If the refresh failed, restore the previous state
-      if (forceRefresh) {
-        log('Refresh failed, restoring previous state.');
-        _loadedPosts.clear();
-        _loadedPosts.addAll(oldPosts);
-        _currentOffset = oldOffset;
-        _hasMorePosts = oldHasMore;
-        _likedPostIds = oldLikedPostIds;
+      // If forcing refresh and network fails, try loading cache as fallback
+      // Also handles the case where initial non-refresh cache load failed but network also failed
+      if (_loadedPosts.isEmpty) {
+        log('[FeedProvider] Network fetch failed, attempting to load from cache as fallback...');
+        await _loadPostsFromCache(isInitialLoad: true);
+        if (_loadedPosts.isEmpty) {
+          _errorMessage = 'Failed to fetch posts and no cached data available.';
+          log('[FeedProvider] Fallback cache load failed or cache was empty.');
+        } else {
+          log('[FeedProvider] Successfully loaded fallback data from cache.');
+        }
+      } else {
+        log('[FeedProvider] Network fetch failed, but cached data is already displayed.');
       }
-      // If initial load (not refresh) failed, _loadedPosts remains empty, which is correct.
-
+      // If not forcing refresh, the cache data loaded earlier (if any) remains visible.
     } finally {
       _isLoading = false;
-      // Notify listeners AFTER all potential state updates are done
+      // Notify listeners AFTER all potential state updates (network or cache fallback)
       notifyListeners();
     }
   }
 
+  // Helper to load posts from cache
+  Future<void> _loadPostsFromCache({required bool isInitialLoad}) async {
+    try {
+      log('[FeedProvider] Loading posts from cache (isInitialLoad: $isInitialLoad)...');
+      // Fetch initial page from cache only on initial load or refresh fallback
+      final cachedPosts =
+          await _dbHelper.getCachedPosts(limit: _fetchLimit, offset: 0);
+      if (cachedPosts.isNotEmpty) {
+        if (isInitialLoad) {
+          _loadedPosts.clear();
+          _loadedPosts.addAll(cachedPosts);
+          log('[FeedProvider] Loaded ${cachedPosts.length} posts from cache for initial display.');
+          // We don't update offset/hasMore based on cache, let network handle it
+        }
+        // Don't load more than the first page from cache automatically here
+      } else {
+        log('[FeedProvider] No posts found in cache.');
+      }
+    } catch (e) {
+      log('[FeedProvider] Error loading posts from cache: $e');
+      // Handle cache read error if needed
+    }
+  }
+
+  // Updated loadMorePosts to handle offline state
   Future<void> loadMorePosts() async {
-    if (_isLoadingMore || !_hasMorePosts || _isLoading) return;
+    // Only attempt network fetch if not already loading, not offline, and potentially has more posts
+    if (_isLoadingMore || _isLoading || _isOffline || !_hasMorePosts) {
+      // Log why we are not fetching more
+      String reason = _isLoadingMore
+          ? "already loading more"
+          : _isLoading
+              ? "initial load in progress"
+              : _isOffline
+                  ? "offline"
+                  : !_hasMorePosts
+                      ? "no more posts expected"
+                      : "unknown";
+      // Avoid excessive logging for "no more posts" as it's expected
+      if (reason != "no more posts expected") {
+        log('[FeedProvider] Skipping loadMorePosts: $reason');
+      }
+      return;
+    }
 
     _isLoadingMore = true;
     notifyListeners();
 
+    List<Post> newNetworkPosts = [];
+    bool networkFetchSuccess = false;
+
     try {
-      final newPosts = await _fetchPosts(limit: _fetchLimit, offset: _currentOffset);
-      _loadedPosts.addAll(newPosts);
-      _currentOffset += newPosts.length;
-      _hasMorePosts = newPosts.length == _fetchLimit;
-      // --- Fetch Profiles for the new posts --- 
-      // This now happens within _fetchPosts, so no separate call needed here.
-      // ------------------------------------------
+      log('[FeedProvider] Attempting network fetch for more posts (offset: $_currentOffset)...');
+      // Use _fetchPostsFromNetwork with the current network offset
+      newNetworkPosts = await _fetchPostsFromNetwork(
+          limit: _fetchLimit, offset: _currentOffset);
+      networkFetchSuccess = true;
+
+      // --- Update State & Cache (only on network success) ---
+      if (newNetworkPosts.isNotEmpty) {
+        _loadedPosts.addAll(newNetworkPosts);
+        _currentOffset += newNetworkPosts.length; // Update network offset
+        _hasMorePosts = newNetworkPosts.length == _fetchLimit;
+
+        // Cache the newly fetched posts
+        await _dbHelper.batchUpsertPosts(newNetworkPosts);
+        log('[FeedProvider] Successfully fetched and cached ${newNetworkPosts.length} more posts.');
+      } else {
+        log('[FeedProvider] Network fetch returned no new posts. Setting hasMorePosts to false.');
+        _hasMorePosts = false; // No more posts found on the network
+      }
     } catch (e) {
-      log('Error loading more posts in Provider: $e');
-      _hasMorePosts = false; // Stop trying to load more on error
+      log('[FeedProvider] Error loading more posts from network: $e');
+      _errorMessage = 'Failed to load more posts.';
+      _isOffline = true; // Indicate potential offline state
+      _hasMorePosts = false; // Stop trying to load more if network failed
+      // No need to update _loadedPosts here, keep what was already loaded
     } finally {
       _isLoadingMore = false;
       notifyListeners();
     }
   }
 
-  Future<List<Post>> _fetchPosts({required int limit, required int offset}) async {
+  // Renamed: Fetches posts ONLY from the network (Supabase)
+  Future<List<Post>> _fetchPostsFromNetwork(
+      {required int limit, required int offset}) async {
+    log('[FeedProvider] Fetching posts from NETWORK: offset=$offset, limit=$limit');
+    // This method now only contains the network fetching logic (Supabase + Profiles)
+    // The error handling specific to network failures is managed by the callers (fetchInitialPosts, loadMorePosts)
     try {
-      // 1. Fetch basic post data
+      // 1. Fetch basic post data from Supabase
       final response = await _supabase
           .from('posts')
           .select(
@@ -186,139 +274,170 @@ class FeedProvider with ChangeNotifier {
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
-      final List<Map<String, dynamic>> postData = List<Map<String, dynamic>>.from(response ?? []);
+      // Check for PostgrestException more explicitly if needed
+      if (response == null) {
+        // Handle null response if Supabase client can return null on error
+        log('[FeedProvider] Network fetch returned null response.');
+        throw Exception('Network error fetching posts: Received null response');
+      }
+
+      final List<Map<String, dynamic>> postData =
+          List<Map<String, dynamic>>.from(response); // No ?? [] here
+
       if (postData.isEmpty) {
+        log('[FeedProvider] No more posts found on network. Offset: $offset');
         return []; // No posts fetched
       }
 
-      log('Fetched basic posts (Provider): offset=$offset, limit=$limit, count=${postData.length}');
+      log('[FeedProvider] Fetched ${postData.length} raw posts from network.');
 
-      // 2. Extract unique user IDs needing profile lookup
+      // 2. Extract unique user IDs needing profile lookup (same logic as before)
       final Set<String> userIdsToFetch = postData
           .map((item) => item['user_id'] as String)
-          // Only fetch if not already cached
           .where((userId) => !_displayNameCache.containsKey(userId))
           .toSet();
 
-      // 3. Fetch profiles if needed
+      // 3. Fetch profiles from network if needed (same logic as before)
       if (userIdsToFetch.isNotEmpty) {
-        log('Fetching profiles for ${userIdsToFetch.length} users.');
+        log('[FeedProvider] Fetching profiles from network for ${userIdsToFetch.length} users.');
         try {
-           final profilesResponse = await _supabase
-            .from('profiles')
-            .select('user_id, display_name')
-            .inFilter('user_id', userIdsToFetch.toList());
-          
-           final List<dynamic> profilesData = profilesResponse as List<dynamic>? ?? [];
-           // Update cache
-           for (var profile in profilesData) {
-             final userId = profile['user_id'] as String;
-             final displayName = profile['display_name'] as String?;
-             _displayNameCache[userId] = displayName; // Store fetched name (or null)
-           }
-           // Ensure IDs that weren't found are also cached (as null)
-           for (var userId in userIdsToFetch) {
-              _displayNameCache.putIfAbsent(userId, () => null);
-           }
+          final profilesResponse = await _supabase
+              .from('profiles')
+              .select('user_id, display_name')
+              .inFilter('user_id', userIdsToFetch.toList());
+
+          final List<dynamic> profilesData =
+              profilesResponse as List<dynamic>? ?? [];
+          for (var profile in profilesData) {
+            final userId = profile['user_id'] as String;
+            final displayName = profile['display_name'] as String?;
+            _displayNameCache[userId] =
+                displayName; // Store fetched name (or null)
+          }
+          // Ensure IDs that weren't found are also cached (as null)
+          for (var userId in userIdsToFetch) {
+            _displayNameCache.putIfAbsent(userId, () => null);
+          }
         } catch (profileError) {
-            log('Error fetching profiles for posts: $profileError');
-            // Cache missing profiles as null to avoid refetching constantly
-            for (var userId in userIdsToFetch) {
-               _displayNameCache.putIfAbsent(userId, () => null);
-            }
+          log('[FeedProvider] Error fetching profiles for posts: $profileError');
+          // Cache missing profiles as null to avoid refetching constantly
+          for (var userId in userIdsToFetch) {
+            _displayNameCache.putIfAbsent(userId, () => null);
+          }
         }
       }
 
-      // 4. Create Post objects using cached display names
+      // 4. Create Post objects using cached display names (same logic as before)
       final List<Post> posts = [];
       for (var item in postData) {
         try {
           final userId = item['user_id'] as String;
-          final fetchedDisplayName = _displayNameCache[userId]; // Get from cache (might be null)
-          posts.add(Post.fromJson(item, fetchedDisplayName: fetchedDisplayName));
+          final fetchedDisplayName = _displayNameCache[userId];
+          posts
+              .add(Post.fromJson(item, fetchedDisplayName: fetchedDisplayName));
         } catch (e) {
-          log('Error parsing post item (Provider): $item, error: $e');
-          // Skip invalid items
+          log('[FeedProvider] Error parsing post item from network data: $item, error: $e');
         }
       }
-      log('Parsed posts with display names (Provider): ${posts.length}');
+      log('[FeedProvider] Parsed ${posts.length} posts from network data.');
       return posts;
+    } on PostgrestException catch (e, stacktrace) {
+      // Catch specific Supabase errors
+      log('[FeedProvider] PostgrestException fetching posts from network: ${e.message}\n$stacktrace');
+      throw Exception(
+          'Network error fetching posts: ${e.message}'); // Rethrow standard Exception
     } catch (e, stacktrace) {
-      log('Error fetching posts (Provider) (offset=$offset, limit=$limit): $e\n$stacktrace');
+      // Catch other potential errors (parsing, etc.)
+      log('[FeedProvider] Generic error fetching posts from network: $e\n$stacktrace');
       rethrow; // Re-throw to be caught by calling methods
     }
   }
 
-  // --- Post Actions ---
+  // --- Post Actions (Update to include cache deletion) ---
 
-  // Return bool for success/failure, UI will handle SnackBar
+  // ReportPost remains mostly the same, only network interaction needed
   Future<bool> reportPost(String postId) async {
-     log('Reporting post (Provider) with ID: $postId');
-     try {
-        await _supabase
-            .from('posts')
-            .update({'reported': true})
-            .eq('post_id', postId);
-        log('Successfully marked post $postId as reported (Provider).');
-
-        // Optimistically update local state
-        final index = _loadedPosts.indexWhere((p) => p.id == postId);
-        if (index != -1) {
-           _loadedPosts[index] = Post( // Create new instance
-             id: _loadedPosts[index].id,
-             userId: _loadedPosts[index].userId,
-             textContent: _loadedPosts[index].textContent,
-             createdAt: _loadedPosts[index].createdAt,
-             imageList: _loadedPosts[index].imageList,
-             reported: true,
-             likeCount: _loadedPosts[index].likeCount,
-             commentCount: _loadedPosts[index].commentCount,
-           );
-           log('Updated local post $postId state to reported=true (Provider)');
-           notifyListeners(); // Notify UI of the change
-        }
-        return true; // Success
-     } catch (e) {
-        log('Error reporting post $postId (Provider): $e');
-        return false; // Failure
-     }
-  }
-
-  // Return bool for success/failure
-  Future<bool> deletePost(String postId) async {
-    log('Attempting to delete post (Provider) with ID: $postId');
+    log('[FeedProvider] Reporting post with ID: $postId');
+    // No change needed for caching here, just reporting status
     try {
-      await _supabase.from('posts').delete().eq('post_id', postId);
-      log('Supabase delete successful (Provider) for post ID: $postId');
+      await _supabase
+          .from('posts')
+          .update({'reported': true}).eq('post_id', postId);
+      log('[FeedProvider] Successfully marked post $postId as reported (Provider).');
 
-      // Remove from local list
-      final initialLength = _loadedPosts.length;
-      _loadedPosts.removeWhere((post) => post.id == postId);
-      // Correct the check: see if length decreased
-      if (_loadedPosts.length < initialLength) { 
-         log('Post removed from local list state (Provider). Count: ${_loadedPosts.length}');
-         notifyListeners(); // Notify UI of the removal
+      // Optimistically update local state
+      final index = _loadedPosts.indexWhere((p) => p.id == postId);
+      if (index != -1) {
+        _loadedPosts[index] = Post(
+          // Create new instance
+          id: _loadedPosts[index].id,
+          userId: _loadedPosts[index].userId,
+          textContent: _loadedPosts[index].textContent,
+          createdAt: _loadedPosts[index].createdAt,
+          imageList: _loadedPosts[index].imageList,
+          reported: true,
+          likeCount: _loadedPosts[index].likeCount,
+          commentCount: _loadedPosts[index].commentCount,
+        );
+        log('[FeedProvider] Updated local post $postId state to reported=true (Provider)');
+        notifyListeners(); // Notify UI of the change
       }
       return true; // Success
     } catch (e) {
-      log('Error deleting post $postId (Provider): $e');
+      log('[FeedProvider] Error reporting post $postId (Provider): $e');
       return false; // Failure
     }
   }
 
-  // --- New Like/Unlike Methods ---
+  // Updated deletePost to remove from cache as well
+  Future<bool> deletePost(String postId) async {
+    log('[FeedProvider] Attempting to delete post ID: $postId');
+    bool networkDeleteSuccess = false;
+    try {
+      // 1. Attempt network delete
+      await _supabase.from('posts').delete().eq('post_id', postId);
+      log('[FeedProvider] Supabase delete successful for post ID: $postId');
+      networkDeleteSuccess = true;
 
-  // Toggles the like status for a post
+      // 2. Remove from local list (optimistic UI update)
+      final initialLength = _loadedPosts.length;
+      _loadedPosts.removeWhere((post) => post.id == postId);
+      if (_loadedPosts.length < initialLength) {
+        log('[FeedProvider] Post removed from local list state.');
+        notifyListeners(); // Notify UI immediately
+      }
+
+      // 3. Remove from local cache
+      await _dbHelper.deletePost(postId);
+
+      return true; // Overall success
+    } catch (e) {
+      log('[FeedProvider] Error deleting post $postId: $e');
+      // If network failed, but was locally removed, maybe keep it removed? Or revert?
+      // For now, just return false. UI won't see it removed if notifyListeners wasn't called.
+      // Consider if UI should be notified even on failure.
+      if (networkDeleteSuccess) {
+        log('[FeedProvider] Network delete succeeded, but cache delete failed for $postId');
+        // Post is removed from UI, but might reappear if cache loads before network next time.
+      }
+      return false; // Failure
+    }
+  }
+
+  // --- Like/Unlike Methods (No direct caching change needed for likes themselves) ---
+  // Likes are fetched with initial posts, caching them separately isn't the primary goal here.
+  // The logic for toggling like remains network-focused.
+
   Future<bool> toggleLikePost(String postId) async {
     final userId = _authService.userId;
     if (userId == null) {
-      log('Error: User not logged in, cannot like post.');
+      log('[FeedProvider] Error: User not logged in, cannot like post.');
       return false; // Can't like if not logged in
     }
 
     final index = _loadedPosts.indexWhere((p) => p.id == postId);
     if (index == -1) {
-      log('Error: Post $postId not found locally for liking.');
+      log('[FeedProvider] Error: Post $postId not found locally for liking.');
       return false; // Post not found locally
     }
 
@@ -336,8 +455,8 @@ class FeedProvider with ChangeNotifier {
       final bool isCurrentlyLiked = likeResponse != null;
 
       if (isCurrentlyLiked) {
-        // --- Unlike --- 
-        log('User $userId is unliking post $postId');
+        // --- Unlike ---
+        log('[FeedProvider] User $userId is unliking post $postId');
         _likedPostIds.remove(postId); // Update local set optimistically
         _loadedPosts[index] = Post(
           id: post.id,
@@ -361,7 +480,7 @@ class FeedProvider with ChangeNotifier {
           // Optional: Decrement like_count in posts table (if no triggers)
           // await _supabase.rpc('decrement_like_count', params: {'pid': postId});
 
-          log('Successfully unliked post $postId for user $userId');
+          log('[FeedProvider] Successfully unliked post $postId for user $userId');
           return true; // Indicate success
         } catch (e) {
           log('Error unliking post $postId in Supabase: $e');
@@ -400,7 +519,8 @@ class FeedProvider with ChangeNotifier {
           log('Successfully liked post $postId for user $userId');
           // --- Send Notification ---
           final likerDisplayName = _displayNameCache[userId] ?? 'Someone';
-          await _sendLikeNotification(post.userId, userId, likerDisplayName, postId);
+          await _sendLikeNotification(
+              post.userId, userId, likerDisplayName, postId);
           // -------------------------
           return true; // Indicate success
         } catch (e) {
@@ -430,7 +550,7 @@ class FeedProvider with ChangeNotifier {
         createdAt: post.createdAt,
         imageList: post.imageList,
         reported: post.reported,
-        likeCount: post.likeCount, 
+        likeCount: post.likeCount,
         commentCount: post.commentCount + 1, // Increment count
       );
       log('Incremented local comment count for post $postId');
@@ -452,7 +572,7 @@ class FeedProvider with ChangeNotifier {
         createdAt: post.createdAt,
         imageList: post.imageList,
         reported: post.reported,
-        likeCount: post.likeCount, 
+        likeCount: post.likeCount,
         commentCount: newCount, // Decrement count
       );
       log('Decremented local comment count for post $postId');
@@ -468,7 +588,8 @@ class FeedProvider with ChangeNotifier {
       final post = _loadedPosts[index];
       // Update only if the count has actually changed
       if (post.commentCount != newCount) {
-        _loadedPosts[index] = Post( // Create a new Post object with the updated count
+        _loadedPosts[index] = Post(
+          // Create a new Post object with the updated count
           id: post.id,
           userId: post.userId,
           textContent: post.textContent,
@@ -481,19 +602,20 @@ class FeedProvider with ChangeNotifier {
         log('[FeedProvider] Updated local comment count for post $postId to $newCount via updateLocalCommentCount');
         notifyListeners(); // Notify UI to rebuild
       } else {
-         log('[FeedProvider] Local comment count for post $postId is already $newCount.');
+        log('[FeedProvider] Local comment count for post $postId is already $newCount.');
       }
     } else {
-       log('[FeedProvider] Post $postId not found locally to update comment count via updateLocalCommentCount.');
+      log('[FeedProvider] Post $postId not found locally to update comment count via updateLocalCommentCount.');
     }
   }
 
   // --- Placeholder for Sending Like Notification ---
-  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId, String likerDisplayName, String postId) async {
+  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId,
+      String likerDisplayName, String postId) async {
     // Prevent self-notification
     if (postAuthorId == likerUserId) {
-       log('[Notification] User $likerUserId liked their own post $postId. No notification sent.');
-       return;
+      log('[Notification] User $likerUserId liked their own post $postId. No notification sent.');
+      return;
     }
 
     log('[Notification] Attempting to send like notification via backend: User $likerUserId liked post $postId by user $postAuthorId');
@@ -507,24 +629,29 @@ class FeedProvider with ChangeNotifier {
 
     // --- Define Backend Endpoint ---
     // IMPORTANT: Replace with your actual backend endpoint for like notifications
-    final String likeNotificationUrl = '$backendBaseUrl/api/send-like-notification';
+    final String likeNotificationUrl =
+        '$backendBaseUrl/api/send-like-notification';
     // -------------------------------
 
     try {
-       // Prepare the notification payload
-       // TODO: Consider fetching the liker's display name/username if needed for the notification body
-       final String title = '$likerDisplayName liked your post!'; // Use display name
-       final String body = '$likerDisplayName liked your post.'; // Example body
+      // Prepare the notification payload
+      // TODO: Consider fetching the liker's display name/username if needed for the notification body
+      final String title =
+          '$likerDisplayName liked your post!'; // Use display name
+      final String body = '$likerDisplayName liked your post.'; // Example body
 
       final response = await http.post(
         Uri.parse(likeNotificationUrl),
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: jsonEncode(<String, dynamic>{
-          'recipientUserId': postAuthorId, // The user ID of the person whose post was liked
-          'likerUserId': likerUserId,    // The user ID of the person who liked the post
-          'postId': postId,              // The ID of the liked post
-          'notificationTitle': title,    // Optional: Title for the notification
-          'notificationBody': body,      // Optional: Body/message for the notification
+          'recipientUserId':
+              postAuthorId, // The user ID of the person whose post was liked
+          'likerUserId':
+              likerUserId, // The user ID of the person who liked the post
+          'postId': postId, // The ID of the liked post
+          'notificationTitle': title, // Optional: Title for the notification
+          'notificationBody':
+              body, // Optional: Body/message for the notification
           // Add any other relevant data your backend needs
         }),
       );

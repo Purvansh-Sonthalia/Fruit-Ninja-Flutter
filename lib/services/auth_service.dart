@@ -8,7 +8,7 @@ class AuthService extends ChangeNotifier {
   bool _isLoading = false;
 
   // Key for local display name storage (mirrors HomeScreen)
-  static const String _displayNameKey = 'user_display_name'; 
+  static const String _displayNameKey = 'user_display_name';
 
   bool get isLoading => _isLoading;
   bool get isLoggedIn => _supabaseClient.auth.currentUser != null;
@@ -16,7 +16,8 @@ class AuthService extends ChangeNotifier {
   String? get userId => _supabaseClient.auth.currentUser?.id;
 
   // Initialize Supabase
-  static Future<void> initialize(String supabaseUrl, String supabaseAnonKey) async {
+  static Future<void> initialize(
+      String supabaseUrl, String supabaseAnonKey) async {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
@@ -33,7 +34,7 @@ class AuthService extends ChangeNotifier {
         email: email,
         password: password,
       );
-      
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -55,7 +56,7 @@ class AuthService extends ChangeNotifier {
         email: email,
         password: password,
       );
-      
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -78,7 +79,7 @@ class AuthService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_displayNameKey);
       print("Cleared local display name on logout.");
-      
+
       _isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -139,13 +140,12 @@ class AuthService extends ChangeNotifier {
           .neq('user_id', userId!) // Exclude the current user
           .limit(1); // We only need to know if at least one exists
 
-
       if (existingNameResponse.isNotEmpty) {
-          // Name is taken by someone else
-          print("Display name '$newName' is already taken.");
-          _isLoading = false;
-          notifyListeners();
-          return false; 
+        // Name is taken by someone else
+        print("Display name '$newName' is already taken.");
+        _isLoading = false;
+        notifyListeners();
+        return false;
       }
 
       // 2. Update or Insert the display name for the current user using upsert
@@ -159,13 +159,12 @@ class AuthService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return true; // Success
-
     } catch (e) {
       print('Error updating display name: $e');
       _isLoading = false;
       notifyListeners();
       // Rethrow the exception to be caught by the UI for specific error handling
-      throw Exception('Failed to update display name: $e'); 
+      throw Exception('Failed to update display name: $e');
     }
   }
 
@@ -190,15 +189,15 @@ class AuthService extends ChangeNotifier {
       }
 
       // 2. Extract user IDs from the scores
-      final List<String> userIds = scoresData
-          .map((score) => score['user_id'] as String)
-          .toList();
+      final List<String> userIds =
+          scoresData.map((score) => score['user_id'] as String).toList();
 
       // 3. Fetch profiles for these specific user IDs
       final profilesResponse = await _supabaseClient
           .from('profiles')
           .select('user_id, display_name')
-          .inFilter('user_id', userIds); // Fetch only profiles for the top scorers
+          .inFilter(
+              'user_id', userIds); // Fetch only profiles for the top scorers
 
       if (profilesResponse == null) {
         print('Error fetching profiles: Response was null');
@@ -206,11 +205,12 @@ class AuthService extends ChangeNotifier {
         // Or throw an error, depending on desired behavior
       }
 
-      final List<dynamic> profilesData = profilesResponse as List<dynamic>? ?? [];
+      final List<dynamic> profilesData =
+          profilesResponse as List<dynamic>? ?? [];
 
       // 4. Create a map for easy lookup of display names by user_id
       final Map<String, String?> profileMap = {
-        for (var profile in profilesData) 
+        for (var profile in profilesData)
           profile['user_id'] as String: profile['display_name'] as String?,
       };
 
@@ -223,13 +223,13 @@ class AuthService extends ChangeNotifier {
         return UserScore(
           uid: userId,
           highScore: highScore,
-          displayName: displayName, // Might be null if profile fetch failed or no profile exists
+          displayName:
+              displayName, // Might be null if profile fetch failed or no profile exists
           email: null, // Not fetched
         );
       }).toList();
 
       return leaderboardScores;
-
     } catch (e) {
       print('Error fetching leaderboard scores: $e');
       if (e is PostgrestException) {
@@ -240,4 +240,4 @@ class AuthService extends ChangeNotifier {
       throw Exception('Failed to load leaderboard: $e');
     }
   }
-} 
+}
