@@ -8,6 +8,8 @@ import 'package:image_picker/image_picker.dart'; // Import image_picker
 import 'dart:convert'; // Import dart:convert for base64Encode
 import 'dart:async'; // Import for Timer
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart'; // Add import
+import 'package:google_generative_ai/google_generative_ai.dart'; // Import Gemini SDK
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 
 import '../providers/message_provider.dart';
 import '../services/auth_service.dart';
@@ -39,12 +41,20 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _highlightedMessageId;
   Timer? _highlightTimer;
 
+  // --- State for AI Enhancement ---
+  bool _isEnhanceButtonEnabled = false;
+  bool _isEnhancing = false;
+  // --- End State for AI Enhancement ---
+
   @override
   void initState() {
     super.initState();
     log('[ChatScreen] Init for chat with ${widget.otherUserName} (ID: ${widget.otherUserId})');
+    // Add listener for text field changes
+    _messageController.addListener(_updateEnhanceButtonState);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchInitialChatMessages();
+      _updateEnhanceButtonState(); // Initialize button state
 
       _pollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -64,11 +74,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _messageController
+        .removeListener(_updateEnhanceButtonState); // Remove listener
     _messageController.dispose();
     _pollingTimer?.cancel();
     _highlightTimer?.cancel();
     super.dispose();
   }
+
+  // --- Update AI Button State ---
+  void _updateEnhanceButtonState() {
+    final bool canEnhance = _messageController.text.trim().isNotEmpty ||
+        _selectedImageBytes != null;
+    if (_isEnhanceButtonEnabled != canEnhance) {
+      if (mounted) {
+        setState(() {
+          _isEnhanceButtonEnabled = canEnhance;
+        });
+      }
+    }
+  }
+  // --- End Update AI Button State ---
 
   void _scrollToBottom() {
     if (_itemScrollController.isAttached) {
@@ -145,6 +171,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _selectedImageBytes = bytes;
           _selectedImageName = pickedFile.name;
         });
+        _updateEnhanceButtonState(); // Update AI button state
         log('[ChatScreen] Image selected: ${pickedFile.name}');
       } else {
         log('[ChatScreen] Image picking cancelled.');
@@ -166,7 +193,135 @@ class _ChatScreenState extends State<ChatScreen> {
       _selectedImageBytes = null;
       _selectedImageName = null;
     });
+    _updateEnhanceButtonState(); // Update AI button state
   }
+
+  // --- AI Enhancement Logic (for chat) ---
+  Future<void> _enhanceChatMessageWithAI() async {
+    if (_isEnhancing) return;
+
+    setState(() {
+      _isEnhancing = true;
+    });
+
+    final apiKey = dotenv.env['GEMINI_API_KEY'];
+    if (apiKey == null) {
+      log('[ChatScreen] Error: GEMINI_API_KEY not found.');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('AI Enhancement is not configured.'),
+              backgroundColor: Colors.red),
+        );
+      }
+      setState(() {
+        _isEnhancing = false;
+      });
+      return;
+    }
+
+    final model =
+        GenerativeModel(model: 'gemini-1.5-flash-latest', apiKey: apiKey);
+    final textContent = _messageController.text.trim();
+    final bool hasText = textContent.isNotEmpty;
+    final bool hasImage = _selectedImageBytes != null;
+
+    List<DataPart> imageParts = [];
+    if (hasImage) {
+      try {
+        imageParts.add(DataPart('image/jpeg', _selectedImageBytes!));
+        log('[ChatScreen] Prepared chat image for AI.');
+      } catch (e) {
+        log('[ChatScreen] Error preparing image data for AI: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Error processing image for AI.'),
+                backgroundColor: Colors.red),
+          );
+        }
+        setState(() {
+          _isEnhancing = false;
+        });
+        return;
+      }
+    }
+
+    String prompt;
+    List<Content> content = [];
+
+    // Tailor prompts for a chat context
+    if (hasText && hasImage) {
+      prompt =
+          'Rewrite the following chat message, making it more clear, friendly, or concise, considering the attached image. Provide only the single, final enhanced text. Original message: "$textContent"';
+      content = [
+        Content.multi([TextPart(prompt), ...imageParts])
+      ];
+    } else if (hasText) {
+      prompt =
+          'Rewrite the following chat message to be more clear, friendly, concise, or professional (choose best fit). Provide only the single, final enhanced text. Original message: "$textContent"';
+      content = [Content.text(prompt)];
+    } else if (hasImage) {
+      prompt =
+          'Write *one* short, relevant message for the attached image, suitable for a direct chat response. Provide only the single message text.';
+      content = [
+        Content.multi([TextPart(prompt), ...imageParts])
+      ];
+    } else {
+      log('[ChatScreen] Enhance AI called with no text or image.');
+      setState(() {
+        _isEnhancing = false;
+      });
+      return;
+    }
+
+    try {
+      log('[ChatScreen] Sending chat request to Gemini...');
+      final response = await model.generateContent(content);
+
+      if (response.text != null) {
+        log('[ChatScreen] Gemini response received: ${response.text}');
+        setState(() {
+          _messageController.text = response.text!;
+          _messageController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _messageController.text.length),
+          );
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Message enhanced by AI!'),
+                backgroundColor: Colors.green),
+          );
+        }
+      } else {
+        log('[ChatScreen] Gemini response was empty.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('AI enhancement failed: No response.'),
+                backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      log('[ChatScreen] Error calling Gemini API: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('AI enhancement failed: ${e.toString()}'),
+              backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEnhancing = false;
+        });
+      }
+    }
+  }
+  // --- End AI Enhancement Logic ---
 
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
@@ -285,7 +440,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     isLoading, hasError, errorMessage, messages, currentUserId),
               ),
             ),
-            _buildMessageInput(),
+            _buildInputArea(),
           ],
         ),
       ),
@@ -415,40 +570,96 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageInput() {
-    final bottomSafePadding = MediaQuery.of(context).padding.bottom;
+  // --- Helper to build the input area ---
+  Widget _buildInputArea() {
+    final bool canSend = _messageController.text.trim().isNotEmpty ||
+        _selectedImageBytes != null;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_replyingToMessage != null) _buildReplyPreview(),
-        if (_selectedImageBytes != null) _buildImagePreview(),
-        Container(
-          padding: EdgeInsets.only(
-              left: 8, right: 8, top: 8, bottom: 8 + bottomSafePadding),
-          color: Colors.black.withOpacity(0.1),
-          child: Row(
+    return Container(
+      padding: EdgeInsets.only(
+        left: 8.0,
+        right: 8.0,
+        top: 8.0,
+        bottom: MediaQuery.of(context).padding.bottom + 8.0, // Safe area
+      ),
+      // Revert to original background color
+      color: Colors.black.withOpacity(0.1),
+      // Remove the BoxShadow if it wasn't there originally
+      /* decoration: BoxDecoration(
+        color: Theme.of(context).cardColor, // Use theme color
+        boxShadow: [
+          BoxShadow(
+            offset: const Offset(0, -2),
+            blurRadius: 4,
+            color: Colors.black.withOpacity(0.1),
+          ),
+        ],
+      ), */
+      child: Column(
+        mainAxisSize: MainAxisSize.min, // Important for Column
+        children: [
+          // --- Replying To Banner ---
+          if (_replyingToMessage != null)
+            _buildReplyBanner(_replyingToMessage!),
+
+          // --- Selected Image Preview ---
+          if (_selectedImageBytes != null)
+            _buildImagePreview(_selectedImageBytes!, _selectedImageName),
+
+          // --- Text Input Row ---
+          Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              IconButton(
-                icon: const Icon(Icons.add_photo_alternate_outlined,
-                    color: Colors.white70),
-                onPressed: () => _pickImage(ImageSource.gallery),
-                tooltip: 'Attach Image',
-                padding: const EdgeInsets.all(10),
-              ),
+              // --- Original Attach Button (Gallery) ---
+              if (_selectedImageBytes == null) // Only show if no image selected
+                IconButton(
+                  icon: const Icon(Icons.add_photo_alternate_outlined,
+                      color: Colors.white70),
+                  tooltip: 'Attach Image',
+                  onPressed: () => _pickImage(ImageSource.gallery),
+                  padding: const EdgeInsets.all(10), // Restore padding
+                ),
+
+              // --- AI Enhance Button ---
+              // Show next to attach button if no image is selected
+              if (_selectedImageBytes == null)
+                Tooltip(
+                  message: 'Enhance with AI',
+                  child: IconButton(
+                    icon: _isEnhancing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white70))
+                        // Use white70 for consistency with original attach button
+                        : Icon(Icons.auto_awesome,
+                            color: _isEnhanceButtonEnabled
+                                ? Colors.white70
+                                : Colors.grey.withOpacity(0.5)),
+                    onPressed: _isEnhancing || !_isEnhanceButtonEnabled
+                        ? null
+                        : _enhanceChatMessageWithAI,
+                    padding: const EdgeInsets.all(10), // Add padding
+                  ),
+                ),
+
+              // --- Text Field (Revert Styling) ---
               Expanded(
                 child: TextField(
                   controller: _messageController,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(
+                      color: Colors.white), // Original text color
                   decoration: InputDecoration(
                     hintText: 'Type a message...',
                     hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
                     border: InputBorder.none,
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.1),
+                    filled: true, // Original filled state
+                    fillColor:
+                        Colors.white.withOpacity(0.1), // Original fill color
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                        horizontal: 16, vertical: 10), // Original padding
+                    // Original border style
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(25.0),
                       borderSide: BorderSide.none,
@@ -462,12 +673,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   keyboardType: TextInputType.multiline,
                   minLines: 1,
                   maxLines: 5,
+                  onChanged: (_) => setState(() {}),
                 ),
               ),
-              const SizedBox(width: 8),
+              // --- Send Button (Revert Styling) ---
               IconButton(
-                icon: const Icon(Icons.send, color: Colors.white),
-                onPressed: _sendMessage,
+                icon: const Icon(Icons.send,
+                    color: Colors.white), // Original icon color
+                tooltip: 'Send',
+                onPressed: canSend ? _sendMessage : null,
+                // Original styling
                 style: IconButton.styleFrom(
                   backgroundColor: Colors.blueAccent,
                   padding: const EdgeInsets.all(12),
@@ -475,16 +690,83 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildReplyPreview() {
-    if (_replyingToMessage == null) return const SizedBox.shrink();
+  // --- Helper to build image preview banner ---
+  Widget _buildImagePreview(Uint8List bytes, String? name) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0, left: 8.0, right: 8.0),
+      child: Container(
+        // Wrap in container to give background
+        padding: const EdgeInsets.all(8.0),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(8.0),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              // Clip the image preview
+              borderRadius: BorderRadius.circular(4.0),
+              child: Container(
+                constraints: const BoxConstraints(maxHeight: 60, maxWidth: 60),
+                child: Image.memory(bytes, fit: BoxFit.cover),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name ?? 'Image selected',
+                // Use a slightly more prominent style for the preview name
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: Colors.white),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // --- AI Enhance Button (for image preview) ---
+            Tooltip(
+              message: 'Enhance with AI',
+              child: IconButton(
+                icon: _isEnhancing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white70))
+                    : Icon(Icons.auto_awesome,
+                        color: _isEnhanceButtonEnabled
+                            ? Colors.white70
+                            : Colors.grey.withOpacity(0.5)),
+                onPressed: _isEnhancing || !_isEnhanceButtonEnabled
+                    ? null
+                    : _enhanceChatMessageWithAI,
+                padding: EdgeInsets.zero, // Adjust padding if needed
+                constraints: const BoxConstraints(),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close,
+                  size: 20, color: Colors.white70), // Ensure icon color
+              tooltip: 'Remove Image',
+              onPressed: _clearSelectedImage,
+              padding: EdgeInsets.zero, // Adjust padding
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
+  // --- Helper to build the reply banner ---
+  Widget _buildReplyBanner(Message message) {
     final bool isReplyingToSelf =
-        _replyingToMessage!.fromUserId == context.read<AuthService>().userId;
+        message.fromUserId == context.read<AuthService>().userId;
     final replyToName = isReplyingToSelf ? 'Yourself' : widget.otherUserName;
 
     return Container(
@@ -507,7 +789,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _replyingToMessage!.messageText ?? '[Media]',
+                  message.messageText ?? '[Media]',
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.8), fontSize: 12),
                   maxLines: 1,
@@ -519,35 +801,6 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             onPressed: _clearReplyState,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildImagePreview() {
-    if (_selectedImageBytes == null) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.only(left: 16, right: 16, top: 8, bottom: 4),
-      color: Colors.black.withOpacity(0.2),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8.0),
-            child: Image.memory(
-              _selectedImageBytes!,
-              width: 160,
-              height: 160,
-              fit: BoxFit.cover,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.white70, size: 20),
-            onPressed: _clearSelectedImage,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           )

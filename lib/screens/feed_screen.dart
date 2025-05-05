@@ -12,6 +12,7 @@ import '../providers/feed_provider.dart'; // Import FeedProvider
 import '../models/post_model.dart'; // Correct import for Post
 import 'comments_screen.dart'; // Import the CommentsScreen
 import '../providers/comments_provider.dart'; // Import CommentsProvider
+import '../utils/text_parsing.dart'; // <-- Import the text parsing utility
 
 // --- New StatefulWidget for Image Viewer ---
 class PostImageViewer extends StatefulWidget {
@@ -706,6 +707,15 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
     final bool hasImages = post.imageList != null && post.imageList!.isNotEmpty;
     final DateFormat dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
 
+    // Define styles for RichText
+    final defaultTextStyle = TextStyle(
+        color: Colors.white.withOpacity(0.9), fontSize: 15, height: 1.4);
+    final mentionTextStyle = TextStyle(
+        color: Colors.lightBlue.shade200,
+        fontWeight: FontWeight.bold,
+        fontSize: 15,
+        height: 1.4);
+
     return Card(
       key: ValueKey(post.id),
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -728,7 +738,6 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  // Use displayName, fallback to YOU or ANONYMOUS
                   widget.isSelfPost ? 'YOU' : (post.displayName ?? 'ANONYMOUS'),
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
@@ -742,50 +751,46 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
                   onPressed: () {
                     widget.onShowOptions(context, post, widget.isSelfPost);
                   },
+                  tooltip: 'Post options', // Add tooltip
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 4),
+          // Conditional SizedBox based on hasImages
+          SizedBox(height: hasImages ? 0 : 4),
           if (hasImages)
             PostImageViewer(
               imageList: post.imageList!,
-              postId: post.id,
+              postId: post.id, // Pass postId for logging
             ),
+          // --- Display Post Text using RichText ---
+          if (post.textContent.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(
+                  top: 8.0, bottom: 4.0, left: 16.0, right: 16.0),
+              child: RichText(
+                text: TextSpan(
+                  // Use the helper function to build spans
+                  children: buildTextSpansWithMentions(
+                    post.textContent,
+                    defaultTextStyle,
+                    mentionTextStyle,
+                  ),
+                ),
+              ),
+            ),
+          // --- End Display Post Text ---
           Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.only(
+                left: 16.0, right: 16.0, bottom: 8.0, top: 4.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  post.textContent,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.white,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  dateFormat.format(post.createdAt.toLocal()),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white.withOpacity(0.8),
-                  ),
-                ),
-                const SizedBox(height: 12), // Add some spacing
-                // --- Like and Comment Row ---
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
+                  // Like Button
                   children: [
-                    // Like Button
                     IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(), // Remove default padding
-                      iconSize: 20,
                       icon: Icon(
-                        // Set icon based on like status
                         widget.isLikedByCurrentUser
                             ? Icons.favorite
                             : Icons.favorite_border,
@@ -793,41 +798,52 @@ class _FeedPostListItemState extends State<_FeedPostListItem> {
                             ? Colors.redAccent
                             : Colors.white70,
                       ),
-                      onPressed: () {
-                        // Call provider method
-                        widget.onToggleLike(post.id);
-                      },
+                      iconSize: 22,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(), // Remove extra padding
+                      tooltip: widget.isLikedByCurrentUser ? 'Unlike' : 'Like',
+                      onPressed: () => widget.onToggleLike(post.id),
                     ),
                     const SizedBox(width: 4),
                     Text(
                       '${post.likeCount}', // Display like count
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 14),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
                     ),
-                    const SizedBox(width: 24), // Spacing
-                    // Comment Button (Placeholder)
+                    const SizedBox(width: 16),
+                    // Comment Button
                     IconButton(
+                      icon: const Icon(Icons.mode_comment_outlined),
+                      color: Colors.white70,
+                      iconSize: 22,
                       padding: EdgeInsets.zero,
                       constraints:
-                          const BoxConstraints(), // Remove default padding
-                      iconSize: 20,
-                      icon: const Icon(
-                        Icons.comment_outlined,
-                        color: Colors.white70,
-                      ),
-                      onPressed: () {
-                        widget.onNavigateToComments(context, post);
-                      },
+                          const BoxConstraints(), // Remove extra padding
+                      tooltip: 'Comment',
+                      onPressed: () =>
+                          widget.onNavigateToComments(context, post),
                     ),
                     const SizedBox(width: 4),
                     Text(
                       '${post.commentCount}', // Display comment count
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 14),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
                     ),
                   ],
                 ),
-                // --- End Like and Comment Row ---
+                // Date Text
+                Text(
+                  dateFormat.format(post.createdAt.toLocal()),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withOpacity(0.6),
+                  ),
+                ),
               ],
             ),
           ),
