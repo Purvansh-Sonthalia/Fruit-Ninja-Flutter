@@ -16,6 +16,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variable
 import '../services/auth_service.dart';
 // --- Add DatabaseHelper import ---
 import '../services/database_helper.dart';
+// --- Add ProfileService import ---
+import '../services/profile_service.dart';
+// --- Add NotificationService import ---
+import '../services/notification_service.dart';
 
 class FeedProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -24,6 +28,10 @@ class FeedProvider with ChangeNotifier {
       AuthService(); // Assuming default constructor or singleton
   // --- Add DatabaseHelper instance ---
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+  // --- Add ProfileService instance ---
+  final ProfileService _profileService = ProfileService();
+  // --- Add NotificationService instance ---
+  final NotificationService _notificationService = NotificationService();
 
   final List<Post> _loadedPosts = [];
   bool _isLoading = false;
@@ -37,9 +45,6 @@ class FeedProvider with ChangeNotifier {
   // --- State for liked posts ---
   Set<String> _likedPostIds = {};
   final bool _isLoadingLikes = false;
-
-  // Map to cache fetched display names <userId, displayName>
-  final Map<String, String?> _displayNameCache = {};
 
   // --- Getters for UI ---
   List<Post> get posts =>
@@ -294,45 +299,26 @@ class FeedProvider with ChangeNotifier {
       // 2. Extract unique user IDs needing profile lookup (same logic as before)
       final Set<String> userIdsToFetch = postData
           .map((item) => item['user_id'] as String)
-          .where((userId) => !_displayNameCache.containsKey(userId))
+          // Removed direct cache check - ProfileService handles it
+          // .where((userId) => !_displayNameCache.containsKey(userId))
           .toSet();
 
-      // 3. Fetch profiles from network if needed (same logic as before)
+      // 3. Fetch profiles from network if needed (use ProfileService)
       if (userIdsToFetch.isNotEmpty) {
-        log('[FeedProvider] Fetching profiles from network for ${userIdsToFetch.length} users.');
-        try {
-          final profilesResponse = await _supabase
-              .from('profiles')
-              .select('user_id, display_name')
-              .inFilter('user_id', userIdsToFetch.toList());
-
-          final List<dynamic> profilesData =
-              profilesResponse as List<dynamic>? ?? [];
-          for (var profile in profilesData) {
-            final userId = profile['user_id'] as String;
-            final displayName = profile['display_name'] as String?;
-            _displayNameCache[userId] =
-                displayName; // Store fetched name (or null)
-          }
-          // Ensure IDs that weren't found are also cached (as null)
-          for (var userId in userIdsToFetch) {
-            _displayNameCache.putIfAbsent(userId, () => null);
-          }
-        } catch (profileError) {
-          log('[FeedProvider] Error fetching profiles for posts: $profileError');
-          // Cache missing profiles as null to avoid refetching constantly
-          for (var userId in userIdsToFetch) {
-            _displayNameCache.putIfAbsent(userId, () => null);
-          }
-        }
+        log('[FeedProvider] Prefetching profiles via ProfileService for ${userIdsToFetch.length} users.');
+        await _profileService.prefetchDisplayNames(userIdsToFetch);
+        log('[FeedProvider] ProfileService prefetch complete.');
+        // Removed old profile fetching/caching block
       }
 
-      // 4. Create Post objects using cached display names (same logic as before)
+      // 4. Create Post objects using ProfileService for display names
       final List<Post> posts = [];
       for (var item in postData) {
         try {
           final userId = item['user_id'] as String;
-          final fetchedDisplayName = _displayNameCache[userId];
+          // Get display name using ProfileService (should hit cache now)
+          final fetchedDisplayName =
+              await _profileService.getDisplayName(userId);
           posts
               .add(Post.fromJson(item, fetchedDisplayName: fetchedDisplayName));
         } catch (e) {
@@ -517,10 +503,16 @@ class FeedProvider with ChangeNotifier {
           // await _supabase.rpc('increment_like_count', params: {'pid': postId});
 
           log('Successfully liked post $postId for user $userId');
-          // --- Send Notification ---
-          final likerDisplayName = _displayNameCache[userId] ?? 'Someone';
-          await _sendLikeNotification(
-              post.userId, userId, likerDisplayName, postId);
+          // --- Send Notification using NotificationService ---
+          final likerDisplayName =
+              await _profileService.getDisplayName(userId) ?? 'Someone';
+          // Call the service method
+          await _notificationService.sendLikeNotification(
+            postAuthorId: post.userId,
+            likerUserId: userId,
+            likerDisplayName: likerDisplayName,
+            postId: postId,
+          );
           // -------------------------
           return true; // Indicate success
         } catch (e) {
@@ -609,65 +601,5 @@ class FeedProvider with ChangeNotifier {
     }
   }
 
-  // --- Placeholder for Sending Like Notification ---
-  Future<void> _sendLikeNotification(String postAuthorId, String likerUserId,
-      String likerDisplayName, String postId) async {
-    // Prevent self-notification
-    if (postAuthorId == likerUserId) {
-      log('[Notification] User $likerUserId liked their own post $postId. No notification sent.');
-      return;
-    }
-
-    log('[Notification] Attempting to send like notification via backend: User $likerUserId liked post $postId by user $postAuthorId');
-
-    // Access the backend URL from environment variables
-    final String? backendBaseUrl = dotenv.env['BACKEND_URL'];
-    if (backendBaseUrl == null) {
-      log('[Notification] Error: BACKEND_URL not found in .env file.');
-      return; // Stop if backend URL is not configured
-    }
-
-    // --- Define Backend Endpoint ---
-    // IMPORTANT: Replace with your actual backend endpoint for like notifications
-    final String likeNotificationUrl =
-        '$backendBaseUrl/api/send-like-notification';
-    // -------------------------------
-
-    try {
-      // Prepare the notification payload
-      // TODO: Consider fetching the liker's display name/username if needed for the notification body
-      final String title =
-          '$likerDisplayName liked your post!'; // Use display name
-      final String body = '$likerDisplayName liked your post.'; // Example body
-
-      final response = await http.post(
-        Uri.parse(likeNotificationUrl),
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode(<String, dynamic>{
-          'recipientUserId':
-              postAuthorId, // The user ID of the person whose post was liked
-          'likerUserId':
-              likerUserId, // The user ID of the person who liked the post
-          'postId': postId, // The ID of the liked post
-          'notificationTitle': title, // Optional: Title for the notification
-          'notificationBody':
-              body, // Optional: Body/message for the notification
-          // Add any other relevant data your backend needs
-        }),
-      );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        log('[Notification] Like notification sent successfully via backend.');
-      } else {
-        log(
-          '[Notification] Failed to send like notification via backend. Status: ${response.statusCode}, Body: ${response.body}',
-        );
-        // Optional: Add more robust error handling or user feedback if needed
-      }
-    } catch (e, stacktrace) {
-      log('[Notification] Error calling like notification backend endpoint: $e\n$stacktrace');
-      // Optional: Add more robust error handling
-    }
-  }
   // --- End Like/Unlike Methods ---
 }

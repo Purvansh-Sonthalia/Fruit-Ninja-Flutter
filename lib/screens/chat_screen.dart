@@ -10,10 +10,15 @@ import 'dart:async'; // Import for Timer
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart'; // Add import
 import 'package:google_generative_ai/google_generative_ai.dart'; // Import Gemini SDK
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
-
-import '../providers/message_provider.dart';
-import '../services/auth_service.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_markdown/flutter_markdown.dart'; // For markdown
+import 'package:uuid/uuid.dart'; // Import Uuid
+import 'package:path_provider/path_provider.dart';
+import '../providers/chat_provider.dart'; // Import ChatProvider
 import '../models/message_model.dart';
+import '../services/auth_service.dart'; // Import AuthService
+import 'package:voice_message_package/voice_message_package.dart'; // Import VoiceMessage
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
@@ -37,9 +42,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Message? _replyingToMessage;
   Uint8List? _selectedImageBytes;
   String? _selectedImageName;
-  Timer? _pollingTimer;
-  String? _highlightedMessageId;
   Timer? _highlightTimer;
+  String? _highlightedMessageId;
 
   // --- State for AI Enhancement ---
   bool _isEnhanceButtonEnabled = false;
@@ -53,23 +57,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // Add listener for text field changes
     _messageController.addListener(_updateEnhanceButtonState);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchInitialChatMessages();
-      _updateEnhanceButtonState(); // Initialize button state
-
-      _pollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          Provider.of<MessageProvider>(context, listen: false)
-              .fetchNewMessagesForChat(widget.otherUserId);
-        } else {
-          timer.cancel();
-        }
-      });
+      Provider.of<ChatProvider>(context, listen: false)
+          .activateChat(widget.otherUserId);
     });
-  }
-
-  Future<void> _fetchInitialChatMessages() async {
-    final provider = Provider.of<MessageProvider>(context, listen: false);
-    await provider.fetchMessagesForChat(widget.otherUserId);
   }
 
   @override
@@ -77,8 +67,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController
         .removeListener(_updateEnhanceButtonState); // Remove listener
     _messageController.dispose();
-    _pollingTimer?.cancel();
     _highlightTimer?.cancel();
+    // Deactivate chat listeners
+    Provider.of<ChatProvider>(context, listen: false).inactivateChat();
     super.dispose();
   }
 
@@ -103,7 +94,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToMessage(String messageId) {
-    final provider = Provider.of<MessageProvider>(context, listen: false);
+    final provider = Provider.of<ChatProvider>(context, listen: false);
     final messages = provider.getMessagesForChat(widget.otherUserId);
     final index = messages.indexWhere((msg) => msg.messageId == messageId);
 
@@ -138,12 +129,15 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _highlightedMessageId = null;
       });
+      // TODO: Re-enable if needed, causes context issues
+      /*
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('Original message not found in the current view.')),
         );
       }
+      */
     }
   }
 
@@ -338,7 +332,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     log('[ChatScreen] Sending message: "$text" ${replyTo != null ? "(Reply)" : ""} ${imageBytes != null ? "(Image Attached)" : ""}');
-    final provider = Provider.of<MessageProvider>(context, listen: false);
+    final provider = Provider.of<ChatProvider>(context, listen: false);
 
     Map<String, dynamic>? mediaPayload;
     if (imageBytes != null) {
@@ -398,15 +392,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final messageProvider = context.watch<MessageProvider>();
+    final chatProvider = context.watch<ChatProvider>();
     final authService = context.read<AuthService>();
     final currentUserId = authService.userId;
 
-    final messages = messageProvider.getMessagesForChat(widget.otherUserId);
-    final isLoading = messageProvider.isLoadingChat(widget.otherUserId);
-    final hasError = messageProvider.chatHasError(widget.otherUserId);
-    final errorMessage =
-        messageProvider.getChatErrorMessage(widget.otherUserId);
+    final messages = chatProvider.getMessagesForChat(widget.otherUserId);
+    final isLoading = chatProvider.isLoadingChat(widget.otherUserId);
+    final hasError = chatProvider.chatHasError(widget.otherUserId);
+    final errorMessage = chatProvider.getChatErrorMessage(widget.otherUserId);
+    final isOffline = chatProvider.isOffline;
 
     final appBarTextColor = Theme.of(context).brightness == Brightness.dark
         ? Colors.white
@@ -769,6 +763,7 @@ class _ChatScreenState extends State<ChatScreen> {
         message.fromUserId == context.read<AuthService>().userId;
     final replyToName = isReplyingToSelf ? 'Yourself' : widget.otherUserName;
 
+    // TODO: Implement or replace missing widget ReplyPreviewWidget
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: Colors.black.withOpacity(0.2),
@@ -807,6 +802,11 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+    // return ReplyPreviewWidget(
+    //    message: message,
+    //    replyToName: replyToName,
+    //    onCancelReply: _clearReplyState,
+    // );
   }
 
   void _showDeleteConfirmation(BuildContext context, Message message) {
@@ -834,7 +834,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 final provider =
-                    Provider.of<MessageProvider>(context, listen: false);
+                    Provider.of<ChatProvider>(context, listen: false);
                 final success = await provider.deleteMessage(
                     message.messageId, widget.otherUserId);
                 if (!success && mounted) {
@@ -889,7 +889,7 @@ class _ChatMessageListItemState extends State<_ChatMessageListItem>
   bool get wantKeepAlive => true;
 
   Widget _buildReplyContent(String parentMessageId, bool isMyMessageBubble) {
-    final provider = context.read<MessageProvider>();
+    final provider = context.read<ChatProvider>();
     final currentUserId = context.read<AuthService>().userId;
 
     return FutureBuilder<Message?>(

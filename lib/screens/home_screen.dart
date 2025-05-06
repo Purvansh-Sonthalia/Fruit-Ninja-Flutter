@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:location/location.dart'; // Import location package
 import 'game_screen.dart';
 import 'auth_screen.dart';
 import '../services/auth_service.dart';
@@ -39,6 +40,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       // Early exit if not mounted
       if (!mounted) return;
 
+      // Location permission is requested earlier in main.dart
+      // We still need to check the status before fetching weather
+
       // Get services (use read inside callbacks)
       final authService = context.read<AuthService>();
       final weatherProvider = context.read<WeatherProvider>();
@@ -46,8 +50,33 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
       // Check and sync FCM token
       _checkAndSyncFcmToken();
-      // Fetch weather and play music
-      weatherProvider.fetchWeatherIfNeeded();
+
+      // --- Fetch weather based on current permission status ---
+      Location location = Location();
+      PermissionStatus permissionStatus = await location.hasPermission();
+      bool serviceEnabled = await location.serviceEnabled();
+
+      if (serviceEnabled &&
+          (permissionStatus == PermissionStatus.granted ||
+              permissionStatus == PermissionStatus.grantedLimited)) {
+        print("HomeScreen: Location permission granted, fetching weather.");
+        weatherProvider.fetchWeatherIfNeeded();
+      } else {
+        print(
+            "HomeScreen: Location permission not granted ($permissionStatus) or service disabled ($serviceEnabled). Skipping weather fetch.");
+        // Optionally, provide feedback or default state
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Enable location services and permissions for weather updates.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+      // --- End Weather Fetch Logic ---
+
       assetsManager.playBackgroundMusic();
 
       // --- New Logic: Check and Prompt for Display Name ---

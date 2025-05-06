@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../providers/message_provider.dart';
+import '../providers/conversation_list_provider.dart';
 import '../models/conversation_summary_model.dart';
 import '../services/auth_service.dart';
 import 'dart:developer';
@@ -19,30 +19,47 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch messages/summaries when the screen loads
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchMessages();
-    });
+    // Fetch summaries when the screen initializes
+    // Use ConversationListProvider
+    final conversationProvider =
+        Provider.of<ConversationListProvider>(context, listen: false);
+    final authService = Provider.of<AuthService>(context, listen: false);
+    if (authService.isLoggedIn) {
+      conversationProvider.fetchSummaries();
+    }
+    // Listen to auth changes to refresh summaries on login/logout
+    authService.addListener(_onAuthStateChanged);
   }
 
-  Future<void> _fetchMessages({bool forceRefresh = false}) async {
-    final messageProvider =
-        Provider.of<MessageProvider>(context, listen: false);
-    // This method now fetches messages and processes them into summaries
-    await messageProvider.fetchMessages(forceRefresh: forceRefresh);
+  void _onAuthStateChanged() {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final conversationProvider =
+        Provider.of<ConversationListProvider>(context, listen: false);
+    if (authService.isLoggedIn) {
+      conversationProvider.fetchSummaries(forceRefresh: true);
+    } else {
+      conversationProvider.clearState(); // Clear summaries on logout
+    }
+  }
+
+  @override
+  void dispose() {
+    // Remove listener to prevent memory leaks
+    Provider.of<AuthService>(context, listen: false)
+        .removeListener(_onAuthStateChanged);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final messageProvider = context.watch<MessageProvider>();
-    // Get AuthService and current user ID
-    final authService = context.read<AuthService>();
-    final currentUserId = authService.userId;
+    // Watch ConversationListProvider
+    final conversationProvider = context.watch<ConversationListProvider>();
+    final authService = context.watch<AuthService>();
 
-    final summaries = messageProvider.conversationSummaries;
-    final isLoading = messageProvider.isLoading;
-    final hasError = messageProvider.hasError;
-    final errorMessage = messageProvider.errorMessage;
+    final summaries = conversationProvider.summaries;
+    final isLoading = conversationProvider.isLoading;
+    final hasError = conversationProvider.hasError;
+    final errorMessage = conversationProvider.errorMessage;
 
     final appBarTextColor = Theme.of(context).brightness == Brightness.dark
         ? Colors.white
@@ -68,13 +85,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
           ),
         ),
         child: RefreshIndicator(
-          onRefresh: () => _fetchMessages(forceRefresh: true),
+          onRefresh: () =>
+              conversationProvider.fetchSummaries(forceRefresh: true),
           child: _buildConversationList(
             isLoading,
             hasError,
             errorMessage,
             summaries,
-            currentUserId,
+            authService.userId,
           ),
         ),
       ),

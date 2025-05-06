@@ -12,18 +12,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/firebase_messaging_service.dart';
 import 'providers/feed_provider.dart';
 import 'providers/comments_provider.dart';
-import 'providers/message_provider.dart';
 import 'providers/user_selection_provider.dart';
+import 'services/location_service.dart';
+import 'providers/conversation_list_provider.dart';
+import 'providers/chat_provider.dart';
 
 // Create a RouteObserver instance
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Notifications Service (We might remove this later)
-  // await NotificationService().initialize();
-
+Future<void> _initializeAppServices() async {
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
@@ -39,6 +36,10 @@ void main() async {
     dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
+  // --- Request Initial Location Permission using LocationService ---
+  await LocationService().requestInitialLocationPermission();
+  // --- End Location Permission Request ---
+
   // Set preferred orientations (portrait only)
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -47,7 +48,11 @@ void main() async {
 
   // Hide status bar
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+}
 
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _initializeAppServices();
   runApp(const MyApp());
 }
 
@@ -75,12 +80,15 @@ class MyApp extends StatelessWidget {
           update: (context, feedProvider, previousCommentsProvider) =>
               CommentsProvider(feedProvider),
         ),
-        ChangeNotifierProxyProvider<AuthService, MessageProvider>(
-          create: (context) => MessageProvider(
-            Provider.of<AuthService>(context, listen: false),
+        ChangeNotifierProvider(
+          create: (context) => ConversationListProvider(
+            authService: Provider.of<AuthService>(context, listen: false),
           ),
-          update: (context, authService, previousMessageProvider) =>
-              MessageProvider(authService),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => ChatProvider(
+            authService: Provider.of<AuthService>(context, listen: false),
+          ),
         ),
         ChangeNotifierProxyProvider<AuthService, UserSelectionProvider>(
           create: (context) => UserSelectionProvider(

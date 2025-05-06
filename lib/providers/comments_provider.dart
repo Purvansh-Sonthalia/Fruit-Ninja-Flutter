@@ -7,22 +7,23 @@ import 'feed_provider.dart'; // To potentially update comment count
 import '../models/post_model.dart';
 import 'dart:convert'; // For jsonEncode and base64Encode
 import 'dart:typed_data'; // For Uint8List
-import 'package:http/http.dart' as http; // For HTTP requests
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
+import '../services/notification_service.dart'; // Import the new service
+import '../services/profile_service.dart'; // Import the profile service
 
 class CommentsProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   final AuthService _authService = AuthService();
   final FeedProvider _feedProvider; // Reference to update comment count
+  final NotificationService _notificationService =
+      NotificationService(); // Add instance
+  final ProfileService _profileService =
+      ProfileService(); // Add ProfileService instance
 
   List<Comment> _comments = [];
   bool _isLoading = false;
   bool _isAddingComment = false;
   bool _isDeletingComment = false; // Add deleting state
   String? _currentPostId;
-
-  // Map to cache fetched display names <userId, displayName>
-  final Map<String, String?> _displayNameCache = {};
 
   // Constructor requires FeedProvider
   CommentsProvider(this._feedProvider);
@@ -86,49 +87,25 @@ class CommentsProvider with ChangeNotifier {
         // Extract unique user IDs from comments needing profile lookup
         final Set<String> userIdsToFetch = commentData
             .map((item) => item['user_id'] as String)
-            .where((userId) => !_displayNameCache.containsKey(userId))
+            // Let ProfileService handle caching logic
+            // .where((userId) => !_displayNameCache.containsKey(userId))
             .toSet();
-        // Add post author ID if not already cached
-        if (postAuthorId != null &&
-            !_displayNameCache.containsKey(postAuthorId)) {
+
+        // Add post author ID if available
+        if (postAuthorId != null) {
           userIdsToFetch.add(postAuthorId);
         }
 
-        // Fetch profiles if needed
+        // Fetch profiles using ProfileService if needed
         if (userIdsToFetch.isNotEmpty) {
-          log('[CommentsProvider] Fetching profiles for ${userIdsToFetch.length} users in comments.');
-          try {
-            final profilesResponse = await _supabase
-                .from('profiles')
-                .select('user_id, display_name')
-                .inFilter('user_id', userIdsToFetch.toList());
-
-            final List<dynamic> profilesData =
-                profilesResponse as List<dynamic>? ?? [];
-            log('[CommentsProvider] Raw profiles data count: ${profilesData.length}');
-            // Update cache
-            for (var profile in profilesData) {
-              final userId = profile['user_id'] as String;
-              final displayName = profile['display_name'] as String?;
-              _displayNameCache[userId] = displayName;
-            }
-            // Cache missing profiles as null
-            for (var userId in userIdsToFetch) {
-              _displayNameCache.putIfAbsent(userId, () => null);
-            }
-            log('[CommentsProvider] Finished caching profiles. Cache size: ${_displayNameCache.length}');
-          } catch (profileError) {
-            log('[CommentsProvider] ERROR fetching profiles for comments: $profileError');
-            // Cache missing profiles as null
-            for (var userId in userIdsToFetch) {
-              _displayNameCache.putIfAbsent(userId, () => null);
-            }
-          }
+          log('[CommentsProvider] Prefetching profiles for ${userIdsToFetch.length} users via ProfileService.');
+          await _profileService.prefetchDisplayNames(userIdsToFetch);
+          log('[CommentsProvider] Finished prefetching profiles.');
         } else {
-          log('[CommentsProvider] No new profiles needed for comments.');
+          log('[CommentsProvider] No new profiles needed according to comment/post data.');
         }
 
-        // Process into the temporary list using cached names
+        // Process into the temporary list using ProfileService for names
         log('[CommentsProvider] Starting to process ${commentData.length} comment items.');
         fetchedComments = []; // Initialize list BEFORE loop
         for (var item in commentData) {
@@ -136,7 +113,9 @@ class CommentsProvider with ChangeNotifier {
             final commentUserId = item['user_id'] as String;
             final isCommentAuthor =
                 postAuthorId != null && commentUserId == postAuthorId;
-            final fetchedDisplayName = _displayNameCache[commentUserId];
+            // Get display name directly from ProfileService (should be cached now)
+            final fetchedDisplayName =
+                await _profileService.getDisplayName(commentUserId);
 
             fetchedComments.add(Comment.fromJson(
               item,
@@ -226,11 +205,38 @@ class CommentsProvider with ChangeNotifier {
       // --- Send Notifications ---
       final newCommentId = response['comment_id'] as String;
       final newCommentText = response['comment_text'] as String? ?? '';
-      // Fetch commenter display name (might already be cached from fetchComments)
-      final commenterDisplayName = _displayNameCache[userId] ??
-          await _fetchDisplayName(userId) ??
-          'Someone';
-      await _sendCommentNotifications(
+      // Fetch commenter display name using ProfileService
+      final commenterDisplayName =
+          await _profileService.getDisplayName(userId) ?? 'Someone';
+
+      // --- Optimistic UI Update ---
+      try {
+        // Determine if the commenter is the post author (needed for Comment model)
+        final postAuthorIdForCheck =
+            await _getPostAuthorId(postId); // Helper needed
+        final isCommentAuthor =
+            postAuthorIdForCheck != null && userId == postAuthorIdForCheck;
+
+        final newComment = Comment.fromJson(
+          response, // Use the response data from the insert
+          isCommentAuthor: isCommentAuthor,
+          fetchedDisplayName: commenterDisplayName,
+        );
+        _comments.insert(0, newComment); // Add to the beginning of the list
+        log('[CommentsProvider] Optimistically added comment ${newComment.id} locally.');
+        // Notify FeedProvider about the new comment count
+        _feedProvider.incrementCommentCount(postId);
+        log('[CommentsProvider] Incremented comment count in FeedProvider for post $postId.');
+      } catch (e, stacktrace) {
+        log('[CommentsProvider] Error constructing or adding comment locally after DB insert: $e\\n$stacktrace');
+        // Consider refetching if local update fails? Or just log?
+        await fetchComments(postId); // Fallback to refetch on error
+        return false; // Indicate potential inconsistency
+      }
+      // --- End Optimistic UI Update ---
+
+      // Call the dedicated NotificationService
+      await _notificationService.sendCommentNotifications(
         postId: postId,
         commenterUserId: userId,
         commenterDisplayName: commenterDisplayName,
@@ -241,7 +247,6 @@ class CommentsProvider with ChangeNotifier {
       );
       // -------------------------
 
-      await fetchComments(postId);
       return true;
     } catch (e, stacktrace) {
       log('Error during addComment process (post $postId): $e\n$stacktrace');
@@ -291,11 +296,27 @@ class CommentsProvider with ChangeNotifier {
 
       // No need to delete from Storage anymore
 
-      success = true; // Mark success after DB deletion
+      // --- Optimistic UI Update ---
+      final originalIndex = _comments.indexWhere((c) => c.id == commentId);
+      if (originalIndex != -1) {
+        _comments.removeAt(originalIndex);
+        log('[CommentsProvider] Optimistically removed comment $commentId locally.');
+        // Notify FeedProvider about the changed comment count
+        _feedProvider.decrementCommentCount(commentToDelete.postId);
+        log('[CommentsProvider] Decremented comment count in FeedProvider for post ${commentToDelete.postId}.');
+      } else {
+        log('[CommentsProvider] Warning: Deleted comment $commentId not found in local list after DB delete.');
+        // Fallback to refetch if local state is inconsistent
+        await fetchComments(commentToDelete.postId);
+        success = true; // Still successful DB op, but UI might jump
+        // Note: We exit finally block below, so need to ensure notifyListeners is called
+        _isDeletingComment = false;
+        notifyListeners(); // Update UI state immediately
+        return success;
+      }
+      // --- End Optimistic UI Update ---
 
-      // --- Refetch comments after successful delete ---
-      await fetchComments(commentToDelete.postId);
-      // ---------------------------------------------
+      success = true; // Mark success after DB deletion AND local removal
     } catch (e, stacktrace) {
       log('Error deleting comment $commentId from Supabase: $e\n$stacktrace');
       success = false; // Mark failure
@@ -319,191 +340,21 @@ class CommentsProvider with ChangeNotifier {
     log('[CommentsProvider] Cleared comments state.');
   }
 
-  // Helper to fetch display name if not in cache (used in notification sending)
-  Future<String?> _fetchDisplayName(String userIdToFetch) async {
-    if (_displayNameCache.containsKey(userIdToFetch)) {
-      return _displayNameCache[
-          userIdToFetch]; // Return cached value if available
-    }
-    log('[DisplayNameCache] Cache miss for $userIdToFetch, fetching from DB.');
-    try {
-      final response = await _supabase
-          .from('profiles')
-          .select('display_name')
-          .eq('user_id', userIdToFetch)
-          .maybeSingle();
-      if (response != null && response['display_name'] != null) {
-        final name = response['display_name'] as String;
-        _displayNameCache[userIdToFetch] = name; // Cache the fetched name
-        return name;
-      } else {
-        _displayNameCache[userIdToFetch] = null; // Cache null if not found
-        return null;
-      }
-    } catch (e) {
-      log('[DisplayNameCache] Error fetching display name for $userIdToFetch: $e');
-      _displayNameCache[userIdToFetch] = null; // Cache null on error
-      return null;
-    }
-  }
-
-  // Renamed and updated function to handle multiple notification types
-  Future<void> _sendCommentNotifications({
-    required String postId,
-    required String commenterUserId,
-    required String commenterDisplayName,
-    required String commentId,
-    required String commentText,
-    required bool hasImage,
-    List<String>? taggedUserIds,
-  }) async {
-    // --- 1. Send Notification to Post Author (if not self-comment) ---
-    log('[Notification] Preparing notification for comment $commentId on post $postId...');
-    String? postAuthorId;
+  // Helper to get post author ID (could be cached or fetched)
+  // NOTE: This might duplicate logic if fetchComments already gets it.
+  // Consider caching post author IDs similar to display names if frequently needed.
+  Future<String?> _getPostAuthorId(String postId) async {
+    // Simple fetch for now, could be optimized with caching
     try {
       final postResponse = await _supabase
           .from('posts')
           .select('user_id')
           .eq('post_id', postId)
-          .single();
-      postAuthorId = postResponse['user_id'] as String?;
-
-      if (postAuthorId != null && postAuthorId != commenterUserId) {
-        log('[Notification] Sending comment notification to post author $postAuthorId');
-        await _sendNotificationViaBackend(
-          recipientUserId: postAuthorId,
-          actorUserId: commenterUserId,
-          actorDisplayName: commenterDisplayName,
-          postId: postId,
-          commentId: commentId,
-          commentText: commentText,
-          hasImage: hasImage,
-          notificationType: 'comment', // Type for post author
-        );
-      } else {
-        log('[Notification] Post author not found or is the commenter ($postAuthorId). No notification sent to author.');
-      }
-    } catch (e, stacktrace) {
-      log('[Notification] Error fetching post author or sending author notification: $e\n$stacktrace');
-    }
-
-    // --- 2. Send Notifications to Tagged Users (if any) ---
-    if (taggedUserIds != null && taggedUserIds.isNotEmpty) {
-      log('[Notification] Sending tag notifications to users: $taggedUserIds');
-      // Use Set to avoid notifying the same user multiple times if tagged multiple times (and exclude author/commenter)
-      final uniqueTaggedIds = taggedUserIds.toSet();
-      uniqueTaggedIds
-          .remove(commenterUserId); // Don't notify commenter of their own tag
-      if (postAuthorId != null) {
-        uniqueTaggedIds.remove(
-            postAuthorId); // Don't send separate tag notification if they are the author
-      }
-
-      for (final taggedUserId in uniqueTaggedIds) {
-        log('[Notification] Sending comment tag notification to user $taggedUserId');
-        await _sendNotificationViaBackend(
-          recipientUserId: taggedUserId,
-          actorUserId: commenterUserId,
-          actorDisplayName: commenterDisplayName,
-          postId: postId,
-          commentId: commentId,
-          // Comment text might be less relevant for a tag notification
-          commentText:
-              null, // Or maybe a snippet: commentText.substring(0, min(commentText.length, 30)) + (commentText.length > 30 ? '...' : ''),
-          hasImage: hasImage, // Still relevant to know if image was involved
-          notificationType:
-              'comment_tag', // *** IMPORTANT: Type for tagged user ***
-        );
-        // Optional delay
-        // await Future.delayed(const Duration(milliseconds: 50));
-      }
-      log('[Notification] Finished sending comment tag notifications.');
+          .maybeSingle(); // Use maybeSingle
+      return postResponse?['user_id'] as String?;
+    } catch (e) {
+      log('[CommentsProvider] Error fetching post author ID for check: $e');
+      return null;
     }
   }
-
-  // --- Centralized Backend Notification Sender ---
-  Future<void> _sendNotificationViaBackend({
-    required String recipientUserId,
-    required String actorUserId, // User performing the action (commenter)
-    required String actorDisplayName,
-    required String postId,
-    required String notificationType, // e.g., 'comment', 'comment_tag'
-    String? commentId, // Nullable for non-comment specific tags if needed later
-    String? commentText, // Nullable
-    bool? hasImage, // Nullable
-  }) async {
-    final String? backendBaseUrl = dotenv.env['BACKEND_URL'];
-    if (backendBaseUrl == null) {
-      log('[Notification] Error: BACKEND_URL not found. Cannot send notification.');
-      return;
-    }
-    final String notificationUrl =
-        '$backendBaseUrl/api/send-like-notification'; // Using the unified endpoint
-
-    // --- Dynamic Title/Body based on Type ---
-    String title;
-    String body;
-    switch (notificationType) {
-      case 'comment':
-        if (hasImage == true && (commentText == null || commentText.isEmpty)) {
-          title = '$actorDisplayName sent an image on your post!';
-          body = '$actorDisplayName sent an image.';
-        } else if (hasImage == true) {
-          title = '$actorDisplayName commented with an image!';
-          body = commentText != null && commentText.length > 80
-              ? '${commentText.substring(0, 77)}... (image attached)'
-              : '$commentText (image attached)';
-        } else {
-          title = '$actorDisplayName commented on your post!';
-          body = commentText != null && commentText.length > 100
-              ? '${commentText.substring(0, 97)}...'
-              : commentText ?? ''; // Default to empty string if somehow null
-        }
-        break;
-      case 'comment_tag':
-        title = '$actorDisplayName tagged you in a comment';
-        body = 'Tap to view the post and comment.'; // Generic body for tag
-        // Optionally include comment snippet or image indication
-        if (hasImage == true && (commentText == null || commentText.isEmpty)) {
-          body = '$actorDisplayName tagged you in a comment with an image.';
-        } else if (hasImage == true) {
-          body =
-              '$actorDisplayName tagged you in a comment with text and an image.';
-        }
-        break;
-      default: // Fallback for unknown types
-        log('[Notification] Warning: Unknown notificationType: $notificationType');
-        title = 'New Notification';
-        body = 'You have a new notification.';
-    }
-    // --- End Dynamic Title/Body ---
-
-    try {
-      final response = await http.post(
-        Uri.parse(notificationUrl),
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode(<String, dynamic>{
-          'recipientUserId': recipientUserId,
-          'likerUserId': actorUserId, // Using this field for the actor
-          'postId': postId,
-          'notificationType': notificationType,
-          'commenterDisplayName': actorDisplayName, // Name of the actor
-          'commentId': commentId,
-          'commentText': commentText,
-          'hasImage': hasImage,
-          'notificationTitle': title,
-          'notificationBody': body,
-        }),
-      );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        log('[Notification] ($notificationType) Notification sent successfully to $recipientUserId.');
-      } else {
-        log('[Notification] ($notificationType) Failed to send notification to $recipientUserId. Status: ${response.statusCode}, Body: ${response.body}');
-      }
-    } catch (e, stacktrace) {
-      log('[Notification] ($notificationType) Error sending notification to $recipientUserId: $e\n$stacktrace');
-    }
-  }
-  // --- End Centralized Sender ---
 }

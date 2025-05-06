@@ -2,36 +2,13 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'models/fruit_model.dart'; // Import the Fruit model
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
-}
-
-// Define the Fruit class
-class Fruit {
-  Offset position;
-  Offset velocity;
-  double radius;
-  Color color;
-  bool isSliced = false;
-
-  Fruit({
-    required this.position,
-    required this.velocity,
-    this.radius = 30.0,
-    this.color = Colors.red, // Default to red
-  });
-
-  // Update fruit position based on velocity and gravity
-  void update(double dt, Size screenSize) {
-    // Apply gravity
-    velocity = velocity + Offset(0, 980 * dt); // Simple gravity simulation
-    // Update position
-    position = position + velocity * dt;
-  }
 }
 
 class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateMixin {
@@ -41,17 +18,19 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   List<Offset> slicePoints = []; // List to hold points of the current slice
   Random random = Random();
   Size? screenSize; // Add state variable for screen size
-  bool needRepaint = false;
   Offset? _lastSlicePoint;
 
   late AnimationController _controller;
   Timer? _spawnTimer;
 
   // Constants for game physics/timing
-  static const double gravity = 980.0;
   static const double fruitInitialSpeedMin = 600.0;
   static const double fruitInitialSpeedMax = 900.0;
   static const double fruitSpawnIntervalSeconds = 1.0;
+  // Added constants
+  static const List<Color> _fruitColors = [Colors.red, Colors.green, Colors.yellow, Colors.orange];
+  static const double _minSlicePointDistance = 15.0;
+  static const Duration _sliceClearDelay = Duration(milliseconds: 200);
 
   @override
   void initState() {
@@ -100,7 +79,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     Offset initialVelocity = Offset(cos(angle) * speed, sin(angle) * speed);
 
     // Randomly choose a fruit color (simple example)
-    Color fruitColor = [Colors.red, Colors.green, Colors.yellow, Colors.orange][random.nextInt(4)];
+    Color fruitColor = _fruitColors[random.nextInt(_fruitColors.length)];
 
     setState(() {
       fruits.add(Fruit(
@@ -114,7 +93,6 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _spawnTimer?.cancel(); // Important to cancel timers
-    _controller.removeListener(_updateGame);
     _controller.dispose();
     super.dispose();
   }
@@ -122,102 +100,95 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   void _updateGame() {
     final double dt = _controller.duration!.inMilliseconds / 1000.0; // Time delta in seconds
     _updateFruits(dt);
-    if (needRepaint) {
-        setState(() {
-            needRepaint = false;
-        });
-    }
   }
 
   void _updateFruits(double dt) {
-    Future.microtask(() {
-        if (screenSize == null) return;
-        bool changes = false;
-        List<Fruit> fruitsThatMoved = [];
-        // Update fruits and remove off-screen ones
-        List<Fruit> fruitsToRemove = [];
-        for (var fruit in fruits) {
-          final oldPosition = fruit.position;
-          fruit.update(dt, screenSize!);
-            if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && !fruit.isSliced) {
-                fruitsToRemove.add(fruit);
-                if (lives > 0) {
-                    lives--;
-                    changes = true;
-                }
-            }
-          else if (fruit.position.dy > screenSize!.height + fruit.radius * 2 && fruit.isSliced) {
-            fruitsToRemove.add(fruit);
-          }
-          // Add fruit to fruitsThatMoved if its position has changed
-          if (oldPosition != fruit.position) {
-            fruitsThatMoved.add(fruit);
-          }
+    if (!mounted || screenSize == null) return; // Check if mounted and screen size is available
 
-        }
-         bool sliceTrailChanged = false;
-        
-        if (fruitsToRemove.isNotEmpty) {
-            fruits.removeWhere((fruit) => fruitsToRemove.contains(fruit));
-            changes = true;
-        }
-        // Clear slice points if the pan ended recently (optional visual persistence)
-        // Add more sophisticated clearing if needed
+    bool shouldSetState = false;
+    List<Fruit> fruitsToRemove = [];
+    
+    for (var fruit in List<Fruit>.from(fruits)) { // Iterate on a copy for safe removal
+      fruit.update(dt, screenSize!); // Pass screenSize directly
 
-        // Check for game over
-        if (lives <= 0) {
-            _gameOver();
-            changes = true;
+      // Check if fruit is out of bounds
+      if (fruit.position.dy > screenSize!.height + fruit.radius * 2) {
+        fruitsToRemove.add(fruit);
+        if (!fruit.isSliced) {
+          // Only lose a life for unsliced fruits missed
+          if (lives > 0) {
+            lives--;
+            shouldSetState = true;
+          }
         }
-        
-      needRepaint = fruitsThatMoved.isNotEmpty || sliceTrailChanged || changes;
-        if(needRepaint){
-          setState(() {
-          });
-        }
-    });
+      } 
+    }
+
+    if (fruitsToRemove.isNotEmpty) {
+      fruits.removeWhere((fruit) => fruitsToRemove.contains(fruit));
+      shouldSetState = true;
+    }
+
+    // Check for game over AFTER updating lives
+    if (lives <= 0) {
+      _gameOver(); // This might navigate away or show a dialog
+      // No need to setState here if _gameOver handles the UI change
+      return; // Stop further processing if game over
+    }
+
+    // If any state relevant to the painter changed, call setState
+    // Changes include: lives changing, fruits removed/added (handled by spawn/removal)
+    // Position changes are handled by the painter's shouldRepaint
+    if (shouldSetState) {
+      setState(() {});
+    }
   }
 
   void _handleSlice(DragUpdateDetails details) {
+    if (!mounted) return;
     final currentPoint = details.localPosition;
-    if (_lastSlicePoint == null || (currentPoint - _lastSlicePoint!).distance > 15) {
-      setState(() {
-        slicePoints.add(currentPoint);
-        _lastSlicePoint = currentPoint;
-      }); 
+    bool sliceExtended = false;
+    bool fruitWasSliced = false;
+
+    // Extend slice trail
+    if (_lastSlicePoint == null || (currentPoint - _lastSlicePoint!).distance > _minSlicePointDistance) {
+      slicePoints.add(currentPoint);
+      _lastSlicePoint = currentPoint;
+      sliceExtended = true;
     }
 
     // Check for intersection with fruits
-    if (slicePoints.length < 2) return; // Need at least two points for a line segment
+    if (slicePoints.length >= 2) {
+      final lastPoint = slicePoints[slicePoints.length - 2];
+      final segment = LineSegment(lastPoint, currentPoint);
 
-    final lastPoint = slicePoints[slicePoints.length - 2];
-    final segment = LineSegment(lastPoint, currentPoint);
-
-    for (var fruit in fruits) {
-      if (!fruit.isSliced) {
-        // Simple distance check from segment to fruit center
-        // A more accurate check would involve line-circle intersection
-        if (segment.distanceToPoint(fruit.position) < fruit.radius) {
+      for (var fruit in fruits) {
+        if (!fruit.isSliced && segment.distanceToPoint(fruit.position) < fruit.radius) {
           fruit.isSliced = true;
           score++;
+          fruitWasSliced = true;
           // TODO: Add slice effect (e.g., split fruit, sound)
-          setState(() {});
         }
       }
     }
-      if (fruits.any((element) => element.isSliced)) {
-        setState(() {});
+
+    // Call setState only once if needed
+    if (sliceExtended || fruitWasSliced) {
+      setState(() {});
     }
   }
 
   void _endSlice(DragEndDetails details) {
+    if (!mounted) return;
       // Clear slice points after a short delay for visual effect, or immediately
-      Future.delayed(const Duration(milliseconds: 200), () {
-        setState(() {
-          slicePoints.clear();
-        }); 
+      _lastSlicePoint = null; // Reset last point for next drag
+      Future.delayed(_sliceClearDelay, () {
+        if (mounted) { // Check mounted again after delay
+           setState(() {
+             slicePoints.clear();
+           }); 
+        }
       });
-
   }
 
   void _gameOver() {
