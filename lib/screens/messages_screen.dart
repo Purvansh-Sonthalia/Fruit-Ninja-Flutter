@@ -19,16 +19,21 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch summaries when the screen initializes
-    // Use ConversationListProvider
-    final conversationProvider =
-        Provider.of<ConversationListProvider>(context, listen: false);
-    final authService = Provider.of<AuthService>(context, listen: false);
-    if (authService.isLoggedIn) {
-      conversationProvider.fetchSummaries();
-    }
+    // Fetch summaries *after* the first frame is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final conversationProvider =
+          Provider.of<ConversationListProvider>(context, listen: false);
+      final authService = Provider.of<AuthService>(context, listen: false);
+      if (authService.isLoggedIn) {
+        conversationProvider.fetchSummaries();
+      }
+    });
+
     // Listen to auth changes to refresh summaries on login/logout
-    authService.addListener(_onAuthStateChanged);
+    // Note: Using addPostFrameCallback for the initial fetch is usually enough,
+    //       but keep the listener for subsequent auth changes.
+    Provider.of<AuthService>(context, listen: false)
+        .addListener(_onAuthStateChanged);
   }
 
   void _onAuthStateChanged() {

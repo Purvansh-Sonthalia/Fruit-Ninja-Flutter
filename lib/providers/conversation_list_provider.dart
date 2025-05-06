@@ -3,10 +3,12 @@ import 'dart:developer';
 import '../models/conversation_summary_model.dart';
 import '../services/conversation_service.dart';
 import '../services/auth_service.dart'; // Needed to get current user ID
+import '../services/database_helper.dart'; // <-- Add import
 
 class ConversationListProvider with ChangeNotifier {
   final ConversationService _conversationService;
   final AuthService _authService; // Inject AuthService
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance; // <-- Add instance
 
   List<ConversationSummary> _summaries = [];
   bool _isLoading = false;
@@ -61,6 +63,17 @@ class ConversationListProvider with ChangeNotifier {
       _errorMessage = '';
       _isOffline = false; // Assume online on success
       log('[ConversationListProvider] Successfully fetched ${_summaries.length} summaries.');
+
+      // --- Add Caching Step ---
+      try {
+        await _dbHelper.batchUpsertConversationSummaries(_summaries);
+        log('[ConversationListProvider] Successfully cached ${_summaries.length} summaries.');
+      } catch (cacheError) {
+        log('[ConversationListProvider] Error caching summaries: $cacheError');
+        // Log the error but don't necessarily fail the whole operation
+        // as the summaries were fetched successfully.
+      }
+      // --- End Caching Step ---
     } catch (e, stacktrace) {
       log('[ConversationListProvider] Error fetching summaries: $e',
           error: e, stackTrace: stacktrace);

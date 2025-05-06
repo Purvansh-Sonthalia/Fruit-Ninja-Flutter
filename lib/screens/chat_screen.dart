@@ -44,6 +44,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _selectedImageName;
   Timer? _highlightTimer;
   String? _highlightedMessageId;
+  ChatProvider? _chatProviderInstance; // Store the provider instance
 
   // --- State for AI Enhancement ---
   bool _isEnhanceButtonEnabled = false;
@@ -54,11 +55,15 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     log('[ChatScreen] Init for chat with ${widget.otherUserName} (ID: ${widget.otherUserId})');
+    // Get the provider instance here
+    _chatProviderInstance = Provider.of<ChatProvider>(context, listen: false);
     // Add listener for text field changes
     _messageController.addListener(_updateEnhanceButtonState);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ChatProvider>(context, listen: false)
-          .activateChat(widget.otherUserId);
+      // Activate chat using the stored instance (or directly if preferred)
+      _chatProviderInstance?.activateChat(widget.otherUserId);
+      // Provider.of<ChatProvider>(context, listen: false)
+      //     .activateChat(widget.otherUserId);
     });
   }
 
@@ -68,8 +73,9 @@ class _ChatScreenState extends State<ChatScreen> {
         .removeListener(_updateEnhanceButtonState); // Remove listener
     _messageController.dispose();
     _highlightTimer?.cancel();
-    // Deactivate chat listeners
-    Provider.of<ChatProvider>(context, listen: false).inactivateChat();
+    // Deactivate chat listeners using the stored instance
+    _chatProviderInstance?.inactivateChat();
+    // Provider.of<ChatProvider>(context, listen: false).inactivateChat(); // Avoid this
     super.dispose();
   }
 
